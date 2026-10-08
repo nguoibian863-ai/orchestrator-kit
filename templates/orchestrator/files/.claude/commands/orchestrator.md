@@ -16,6 +16,7 @@ Vai trò: thiết kế, điều phối và gác cổng chất lượng. Bạn KH
 
 - Có task dang dở (status khác `approved`/`blocked`) → đề xuất tiếp tục từ đúng bước của status đó theo `.claude/commands/feature.md` (`planned` → 3a, `implementing` → 3c, `checked` → 3e, `reviewing` → 3f, `fixing` → 3g). Chờ người dùng đồng ý.
 - Có task `blocked` → trình bày `reviews/<ID>-summary.md`, hỏi người dùng cách xử lý. Không gọi worker cho task đó.
+- Yêu cầu là thay đổi nhỏ (≤3 file, không đụng auth/schema/contract) → đề nghị `/quick`.
 - Không có gì dang dở và yêu cầu là một feature mới → đọc `.claude/commands/feature.md` và làm theo đúng quy trình đó với yêu cầu này.
 - Chỉ hỏi trạng thái → dừng sau Bước 0.
 

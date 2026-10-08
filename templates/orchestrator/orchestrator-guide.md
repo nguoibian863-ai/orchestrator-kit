@@ -22,6 +22,8 @@ Cập nhật v3.7: `run-task.ps1` và `finish-task.ps1` gói các bước của 
 
 Cập nhật v3.8: vòng fix tiếp tục phiên worker cũ (`-Resume` + `resume_args`); mỗi lần gọi worker ghi một dòng `tasks/<ID>/metrics.jsonl`.
 
+Cập nhật v3.9: khoá `mode` (`lean` mặc định | `full`) — lean thì orchestrator tự thiết kế/chia task/review và `run-review.ps1` đọc một file `review-output.md`; thêm lệnh `/quick` cho thay đổi nhỏ.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -112,6 +114,8 @@ Tạo project mới: mở Claude Code trong thư mục trống, gõ `/init-orche
 ```
 
 ## 5. Agents
+
+Chế độ `lean` (mặc định) KHÔNG dùng subagent — orchestrator tự làm các vai dưới đây và tự ghi `tasks/<ID>/review-output.md`. Lý do: mỗi subagent đọc lại mã từ đầu nên tốn token (đo thật: một lượt architect ~158k token). Bảng dưới áp dụng cho chế độ `full`.
 
 Mỗi agent = **Role** (file trong `.claude/agents/`) + **State** (`state/`) + **Knowledge** (chỉ được đọc những file ghi trong agent). Agent ghi kết quả ra file và chỉ trả về tóm tắt ngắn, để context của phiên chính không phình.
 
@@ -214,6 +218,8 @@ Mặc định `checks` trống — `run-checks.ps1` trả exit 2 để orchestra
 
 ## 10. Review & thang mức độ
 
+Chế độ `lean`: một báo cáo `tasks/<ID>/review-output.md`, nguồn hiển thị là `Orchestrator`; thang mức độ, nhãn `[conf:...]` và quy tắc chặn giữ nguyên. Chế độ `full`: ba báo cáo như bảng trên. Nếu khoá `mode` bị thiếu, `review-output.md` không tồn tại và đủ cả ba báo cáo reviewer/security/qa thì `run-review.ps1` dùng `full` để tương thích ngược; khoá `mode` tường minh luôn thắng.
+
 Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu, crash, sai nghiệp vụ cốt lõi) · **HIGH** (nghiêm trọng, chưa sập ngay) · **MEDIUM** (vi phạm best practice) · **LOW** (nhỏ, style).
 
 Định dạng báo cáo cố định để script đếm: heading `## CRITICAL` / `## HIGH` / `## MEDIUM` / `## LOW`; mỗi phát hiện là một dòng bắt đầu bằng `- ` ở đầu dòng với nhãn `[conf:HIGH]`, `[conf:MEDIUM]` hoặc `[conf:LOW]` ngay sau `- `; chi tiết thụt vào bên dưới; mục trống để trống. CRITICAL/HIGH có nhãn HIGH/MEDIUM hoặc thiếu nhãn tính chặn; CRITICAL/HIGH có nhãn LOW không tính chặn và xuất hiện ở mục riêng. MEDIUM/LOW vẫn được đếm theo mức. Báo cáo cũ không có nhãn tiếp tục tính CRITICAL/HIGH là chặn. `run-review.ps1` ghi báo cáo tổng hợp `reviews/<ID>-round<N>-<thời điểm>.md` với bảng số liệu ở đầu, gồm cột `CRIT/HIGH conf:LOW`.
@@ -247,6 +253,7 @@ Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu
 |---|---|
 | `/orchestrator [yêu cầu]` | Xem trạng thái, tiếp tục việc dang dở, hoặc chuyển sang quy trình feature |
 | `/feature <mô tả>` | Toàn bộ quy trình: thiết kế → chia task → worker → checks → review → fix → commit |
+| `/quick <mô tả>` | Thay đổi nhỏ (≤3 file, không đụng auth/schema/contract): bỏ thiết kế và chia task, vẫn qua worker, checks, review |
 | `/review-task <ID>` | Chạy lại vòng review cho một task (ví dụ sau khi sửa tay) |
 | `/fix <ID>` | Chạy một vòng fix theo báo cáo gần nhất |
 

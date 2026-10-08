@@ -8,6 +8,7 @@ Feature cần làm: $ARGUMENTS
 ## Quy ước
 
 - Gọi script từ thư mục gốc project: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/<tên>.ps1 <tham số>`. Bên dưới chỉ ghi `scripts/<tên>.ps1 <tham số>`.
+- Đọc `mode` trong `orchestrator.config.json` (thiếu = `lean`). **lean**: orchestrator tự làm phần thiết kế/chia task/review, KHÔNG gọi subagent — ghi một báo cáo duy nhất `tasks/<ID>/review-output.md`. **full**: gọi subagent như mô tả ở từng bước.
 - **Mã thoát của script là quyết định.** Không tự đọc log rồi "cho qua" khi script trả mã lỗi.
 - Không tự sửa file trong `state/` — chỉ ghi qua `update-state.ps1`, `update-workflow.ps1`, `start-task.ps1`.
 - `run-worker.ps1` có thể chạy tới `worker.timeout_sec` giây (mặc định 540): đặt timeout của lệnh shell 600000 ms, hoặc chạy nền rồi chờ thông báo hoàn tất.
@@ -26,11 +27,15 @@ Feature cần làm: $ARGUMENTS
 2. Nếu feature có tài liệu/API bên ngoài liên quan → gọi subagent `retriever` (thư mục `tasks/feature-<slug>/`).
 3. Gọi subagent `architect` → `tasks/feature-<slug>/design.md`. Có "Điểm chưa rõ" → hỏi người dùng trước khi đi tiếp. Có "Thay đổi kiến trúc" → tóm tắt cho người dùng và chờ đồng ý.
 
+Chế độ lean: orchestrator tự ghi `tasks/feature-<slug>/design.md` (các mục: Mục tiêu, Hợp đồng — tên trường/mã thoát/khoá config nguyên văn, Rủi ro, Task), không gọi retriever/architect. Chế độ full: gọi subagent như trên.
+
 ## 2. Chia task
 
 1. `scripts/update-workflow.ps1 -Phase planning`
 2. Gọi subagent `planner` → `tasks/feature-<slug>/plan.md`.
 3. Với mỗi task theo thứ tự: `scripts/update-state.ps1 -TaskId <ID> -Status planned -Title "<tiêu đề>"`
+
+Chế độ lean: orchestrator tự ghi `tasks/feature-<slug>/plan.md` theo cùng mẫu, không gọi planner.
 
 ## 3. Thực hiện từng task (theo thứ tự phụ thuộc)
 
@@ -49,6 +54,8 @@ Feature cần làm: $ARGUMENTS
 | 1 (run-worker), 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
 
 **c. Review** — `scripts/update-workflow.ps1 -Phase review-loop`. Gọi **song song** 3 subagent `reviewer`, `security`, `qa` với TaskId; mỗi agent tự ghi `tasks/<ID>/<tên>-output.md`.
+
+Chế độ lean: orchestrator tự đọc `tasks/<ID>/changes.patch` + `output.md` (cả mục "Sai lệch so với yêu cầu") và tự ghi `tasks/<ID>/review-output.md` theo đúng khung mức độ + nhãn `[conf:...]` như `.claude/agents/reviewer.md` quy định, gộp cả góc nhìn bảo mật và test. Chế độ full: gọi 3 subagent song song.
 
 **d. Tổng hợp và duyệt** — `scripts/finish-task.ps1 -TaskId <ID> -Message "<mô tả ngắn>"`. Script tự cập nhật reviewing, tổng hợp review, rồi chỉ khi đạt mới cập nhật approved và commit `[worker] <ID>: <mô tả ngắn>`. Nếu in `Chú ý: ... conf:LOW`, ghi vào Nợ kỹ thuật, không tự chặn. Không merge. Task kế tiếp sẽ tách nhánh từ nhánh này.
 

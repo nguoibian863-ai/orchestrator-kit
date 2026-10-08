@@ -1,4 +1,5 @@
-﻿# Gộp 3 báo cáo reviewer/security/qa của một task, đếm phát hiện theo mức độ và ra kết luận.
+﻿# Gộp báo cáo review của một task, đếm phát hiện theo mức độ và ra kết luận.
+# Nếu thiếu khoá mode và thiếu review-output.md nhưng đủ 3 báo cáo cũ thì dùng full để tương thích ngược.
 # CRITICAL/HIGH gắn conf:LOW không tính chặn và được liệt kê riêng trong báo cáo tổng hợp.
 # Mã thoát: 0 = không còn CRITICAL/HIGH tính chặn | 1 = còn CRITICAL/HIGH tính chặn -> sang bước fix | 2 = thiếu báo cáo
 param([Parameter(Mandatory = $true)][string]$TaskId)
@@ -47,13 +48,39 @@ function Measure-Findings([string]$Text) {
 }
 
 $taskRel = "tasks/$TaskId"
+# Khi config không có khoá mode, nếu thiếu review-output.md nhưng đủ cả 3 báo cáo cũ thì dùng full để tương thích ngược.
+$config = Get-Config
+$modeWasSet = Test-Prop $config 'mode'
+$configuredMode = Get-Prop $config 'mode' ''
+$modeValue = if ($null -eq $configuredMode) { '' } else { [string]$configuredMode }
+$mode = if ([string]::IsNullOrWhiteSpace($modeValue)) { 'lean' } else { $modeValue.Trim().ToLowerInvariant() }
+if ($mode -notin @('lean', 'full')) {
+    Fail 1 "Khoá 'mode' trong orchestrator.config.json không hợp lệ: '$modeValue' (chỉ nhận: lean, full)."
+}
+
 $roles = [ordered]@{ reviewer = 'Reviewer'; security = 'Security Auditor'; qa = 'QA' }
+$reportFiles = [ordered]@{ reviewer = 'reviewer-output.md'; security = 'security-output.md'; qa = 'qa-output.md' }
+$legacyReportsExist = $true
+foreach ($file in $reportFiles.Values) {
+    if (-not (Test-Path -LiteralPath (Get-ProjectPath "$taskRel/$file"))) { $legacyReportsExist = $false; break }
+}
+$singleReportExists = Test-Path -LiteralPath (Get-ProjectPath "$taskRel/review-output.md")
+if (-not $modeWasSet -and -not $singleReportExists -and $legacyReportsExist) {
+    $mode = 'full'
+}
+if ($mode -eq 'lean') {
+    $roles = [ordered]@{ orchestrator = 'Orchestrator' }
+    $reportFiles = [ordered]@{ orchestrator = 'review-output.md' }
+}
+Write-Host "Chế độ review: $mode"
+
 $levels = @('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')
 $reports = [ordered]@{}
 $missing = @()
 foreach ($k in $roles.Keys) {
-    $p = Get-ProjectPath "$taskRel/$k-output.md"
-    if (Test-Path -LiteralPath $p) { $reports[$k] = Read-TextUtf8 $p } else { $missing += "$taskRel/$k-output.md" }
+    $relativeReport = "$taskRel/$($reportFiles[$k])"
+    $p = Get-ProjectPath $relativeReport
+    if (Test-Path -LiteralPath $p) { $reports[$k] = Read-TextUtf8 $p } else { $missing += $relativeReport }
 }
 if ($missing.Count -gt 0) { Fail 2 "Thiếu báo cáo: $($missing -join ', ')" }
 

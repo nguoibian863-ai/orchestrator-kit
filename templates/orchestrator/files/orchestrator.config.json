@@ -1,4 +1,5 @@
 {
+  "mode": "lean",
   "worker": "agy",
   "workers": {
     "agy": {

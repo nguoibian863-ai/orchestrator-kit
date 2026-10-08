@@ -26,4 +26,4 @@ Tham số: $ARGUMENTS
    - Điền `checks` trong `orchestrator.config.json`.
    - `git init` và commit khung (cần ít nhất một commit trước khi `start-task.ps1` tạo nhánh).
    - `docs/`, `memory/`, `.claude/skills/*` hiện chỉ là khung rỗng, sẽ được điền dần khi có task thật.
-   - Bắt đầu bằng `/orchestrator <yêu cầu>` hoặc `/feature <mô tả>`.
+   - Bắt đầu bằng `/orchestrator <yêu cầu>`, `/feature <mô tả>` (việc lớn) hoặc `/quick <mô tả>` (thay đổi nhỏ).
