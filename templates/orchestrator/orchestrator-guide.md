@@ -12,6 +12,8 @@ Cập nhật v3.2: `run-worker.ps1` chụp dấu vân tay `.git/config`, `.git/h
 
 Cập nhật v3.3: worker có khoá `output`; `agy` mặc định dùng JSON envelope để phân biệt bị từ chối, không trả lời và status lỗi. Thứ tự mã thoát của `run-worker.ps1` là `6 > 124 > 3 > 11 > 10 > 8 > 9 > 5 > 7`.
 
+Cập nhật v3.4: 3 agent review ghi nhãn độ tin cậy cho từng phát hiện; `run-review.ps1` chỉ chặn CRITICAL/HIGH có nhãn HIGH/MEDIUM hoặc thiếu nhãn, còn nhãn LOW được liệt kê riêng.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -198,7 +200,7 @@ Mặc định `checks` trống — `run-checks.ps1` trả exit 2 để orchestra
 
 Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu, crash, sai nghiệp vụ cốt lõi) · **HIGH** (nghiêm trọng, chưa sập ngay) · **MEDIUM** (vi phạm best practice) · **LOW** (nhỏ, style).
 
-Định dạng báo cáo cố định để script đếm: heading `## CRITICAL` / `## HIGH` / `## MEDIUM` / `## LOW`; mỗi phát hiện là một dòng bắt đầu bằng `- ` ở đầu dòng; chi tiết thụt vào bên dưới; mục trống để trống. `run-review.ps1` ghi báo cáo tổng hợp `reviews/<ID>-round<N>-<thời điểm>.md` với bảng số liệu ở đầu.
+Định dạng báo cáo cố định để script đếm: heading `## CRITICAL` / `## HIGH` / `## MEDIUM` / `## LOW`; mỗi phát hiện là một dòng bắt đầu bằng `- ` ở đầu dòng với nhãn `[conf:HIGH]`, `[conf:MEDIUM]` hoặc `[conf:LOW]` ngay sau `- `; chi tiết thụt vào bên dưới; mục trống để trống. CRITICAL/HIGH có nhãn HIGH/MEDIUM hoặc thiếu nhãn tính chặn; CRITICAL/HIGH có nhãn LOW không tính chặn và xuất hiện ở mục riêng. MEDIUM/LOW vẫn được đếm theo mức. Báo cáo cũ không có nhãn tiếp tục tính CRITICAL/HIGH là chặn. `run-review.ps1` ghi báo cáo tổng hợp `reviews/<ID>-round<N>-<thời điểm>.md` với bảng số liệu ở đầu, gồm cột `CRIT/HIGH conf:LOW`.
 
 ## 11. Vòng fix
 
@@ -240,7 +242,7 @@ Trước task đầu tiên: điền `checks`, `git init` + commit khung (Claude 
 - Phát hiện file cấm dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác. Riêng `.git/config`, `.git/hooks/**`, `.git/info/**` và `core.hooksPath` được chụp trước/sau worker; nếu `.git/config` hoặc `.git/info/**` đổi, script bỏ qua `git diff` và không chạy lệnh git nào trước khi người dùng kiểm tra.
 - Giới hạn đã biết (R10): chưa phát hiện worker sửa `.gitignore` để che file mới trong thư mục cấm, ghi file ra ngoài workspace bằng đường dẫn tuyệt đối, hoặc sửa `refs/`, `HEAD`, `index`.
 - Thay đổi trong `tasks/`, `reviews/`, `state/` không được kiểm tra phạm vi.
-- Script đếm phát hiện dựa trên định dạng báo cáo; agent viết sai định dạng sẽ bị đếm sai — Claude vẫn phải đọc báo cáo tổng hợp khi kết quả đáng ngờ.
+- Script đếm phát hiện dựa trên định dạng báo cáo; nhãn sai vị trí hoặc sai giá trị được coi là thiếu nhãn và CRITICAL/HIGH vẫn tính chặn. Agent viết sai định dạng khác vẫn có thể bị đếm sai — Claude vẫn phải đọc báo cáo tổng hợp khi kết quả đáng ngờ.
 
 ## 16. Quy tắc quan trọng nhất
 

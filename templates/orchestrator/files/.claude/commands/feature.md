@@ -56,7 +56,7 @@ Feature cần làm: $ARGUMENTS
 **e. Review** — `scripts/update-state.ps1 -TaskId <ID> -Status reviewing` và `scripts/update-workflow.ps1 -Phase review-loop`. Gọi **song song** 3 subagent `reviewer`, `security`, `qa` với TaskId; mỗi agent tự ghi `tasks/<ID>/<tên>-output.md`.
 
 **f. Tổng hợp** — `scripts/run-review.ps1 -TaskId <ID>`:
-- 0 → sang bước h.
+- 0 → sang bước h; nếu script in `Chú ý: ... conf:LOW` → ghi vào Nợ kỹ thuật, không tự chặn.
 - 1 → còn CRITICAL/HIGH, sang bước g.
 - 2 → thiếu báo cáo: gọi lại đúng agent còn thiếu.
 
@@ -71,6 +71,6 @@ Feature cần làm: $ARGUMENTS
 1. Cập nhật `memory/decisions.md` (mục mới cho mỗi quyết định thật), `memory/architecture.md` (nếu kiến trúc đổi), `memory/roadmap.md`, và ghi đè phần liên quan trong `memory/summary.md` (giữ 40–60 dòng).
 2. Commit trên nhánh hiện tại: `[orchestrator] cập nhật memory sau feature <tên>`.
 3. `scripts/update-workflow.ps1 -Phase done`.
-4. Báo cáo theo mẫu "Tổng kết" trong `.claude/commands/orchestrator.md`, kèm tên nhánh cuối cùng (chứa toàn bộ task). Mục "Nợ kỹ thuật" liệt kê từng phát hiện MEDIUM/LOW còn lại, đọc từ báo cáo tổng hợp gần nhất của mỗi task trong `reviews/` (chỉ đọc các dòng phát hiện, không đọc lại toàn bộ code). Merge hoặc tạo PR chỉ khi người dùng yêu cầu.
+4. Báo cáo theo mẫu "Tổng kết" trong `.claude/commands/orchestrator.md`, kèm tên nhánh cuối cùng (chứa toàn bộ task). Mục "Nợ kỹ thuật" liệt kê từng phát hiện MEDIUM/LOW và CRITICAL/HIGH gắn conf:LOW còn lại, đọc từ báo cáo tổng hợp gần nhất của mỗi task trong `reviews/` (chỉ đọc các dòng phát hiện, không đọc lại toàn bộ code). Merge hoặc tạo PR chỉ khi người dùng yêu cầu.
 
 Không bao giờ bỏ qua bước kiểm tra tự động hoặc bước review. Không approve khi còn CRITICAL.

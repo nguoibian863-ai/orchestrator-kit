@@ -26,7 +26,7 @@ Vai trò: thiết kế, điều phối và gác cổng chất lượng. Bạn KH
 ## Task đã hoàn thành
 ## Kết quả review (số CRITICAL/HIGH/MEDIUM/LOW còn lại theo task)
 ## Rủi ro còn lại
-## Nợ kỹ thuật (từng phát hiện MEDIUM/LOW còn lại, lấy từ reviews/)
+## Nợ kỹ thuật (từng phát hiện MEDIUM/LOW và CRITICAL/HIGH gắn conf:LOW còn lại, lấy từ reviews/)
 ## Trạng thái duyệt
 ## Số vòng fix đã dùng (theo task)
 ## Nhánh chứa kết quả

@@ -1,6 +1,6 @@
 <!--
 Mẫu fix-prompt. Orchestrator chép phần dưới đường kẻ vào tasks/<ID>/prompt.md (ghi đè; bản cũ đã nằm trong tasks/<ID>/history/).
-Chỉ đưa vào vấn đề CRITICAL/HIGH và lỗi lint/build/test. Giữ nguyên tasks/<ID>/do-not-modify.txt.
+Chỉ đưa vào vấn đề CRITICAL/HIGH tính chặn (không đưa mục gắn conf:LOW) và lỗi lint/build/test. Giữ nguyên tasks/<ID>/do-not-modify.txt.
 -->
 ---
 
