@@ -51,17 +51,17 @@ Tham số là framework và database, có thể bỏ trống. Sau đó bắt đ�
 Bộ smoke test hồi quy cần Windows PowerShell 5.1 trở lên và git có trong PATH. Không cần cài package.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File src/tests/smoke.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke.ps1
 ```
 
 Dùng -Filter với wildcard theo tên case, ví dụ chỉ chạy nhóm review:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File src/tests/smoke.ps1 -Filter '20*'
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke.ps1 -Filter '20*'
 ```
 
 Dùng -Keep để giữ và in đường dẫn các project Git tạm nhằm kiểm tra thủ công:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File src/tests/smoke.ps1 -Keep
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke.ps1 -Keep
 ```
