@@ -14,6 +14,8 @@ Cập nhật v3.3: worker có khoá `output`; `agy` mặc định dùng JSON env
 
 Cập nhật v3.4: 3 agent review ghi nhãn độ tin cậy cho từng phát hiện; `run-review.ps1` chỉ chặn CRITICAL/HIGH có nhãn HIGH/MEDIUM hoặc thiếu nhãn, còn nhãn LOW được liệt kê riêng.
 
+Cập nhật v3.5: bổ sung mẫu prompt worker, fix-prompt và agent planner với "File mẫu để bắt chước", "Hợp đồng nguyên văn", quy tắc không sửa test có sẵn, test đường lỗi và mục output "Sai lệch so với yêu cầu"; reviewer và qa đối chiếu mục này với prompt.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |

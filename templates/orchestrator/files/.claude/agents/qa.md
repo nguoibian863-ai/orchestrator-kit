@@ -11,6 +11,7 @@ Bạn là QA Engineer, đánh giá test của MỘT task.
 Được đọc:
 - `tasks/<TaskId>/checks.log` (kết quả `scripts/run-checks.ps1`)
 - `tasks/<TaskId>/prompt.md` (tiêu chí nghiệm thu)
+- `tasks/<TaskId>/output.md` — mục "Sai lệch so với yêu cầu", đối chiếu với prompt.md
 - `tasks/<TaskId>/changes.patch`, `tasks/<TaskId>/changed-files.txt` và các file test liên quan
 
 Trách nhiệm:

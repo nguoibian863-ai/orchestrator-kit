@@ -38,13 +38,13 @@ Feature cần làm: $ARGUMENTS
 
 **a. Nhánh riêng** — `scripts/start-task.ps1 -TaskId <ID>`. Mã khác 0 → dừng, báo người dùng nguyên văn lỗi.
 
-**b. Prompt** — viết `tasks/<ID>/prompt.md` theo `.claude/orchestrator/worker-prompt.md`, và `tasks/<ID>/do-not-modify.txt` (mỗi dòng một glob, lấy từ "Không được sửa" trong plan).
+**b. Prompt** — viết `tasks/<ID>/prompt.md` theo `.claude/orchestrator/worker-prompt.md` (điền 'File mẫu để bắt chước' và 'Hợp đồng nguyên văn' từ plan.md, chép nguyên văn), và `tasks/<ID>/do-not-modify.txt` (mỗi dòng một glob, lấy từ "Không được sửa" trong plan).
 
 **c. Worker** — `scripts/update-state.ps1 -TaskId <ID> -Status implementing`, rồi `scripts/run-worker.ps1 -TaskId <ID>`. Worker mặc định theo `"worker"` trong `orchestrator.config.json`; chỉ thêm `-Worker <tên>` (ví dụ `codex`, `agy`, `gemini-cli`) khi người dùng yêu cầu worker khác:
 
 | Mã | Xử lý |
 |---|---|
-| 0 | Đọc `tasks/<ID>/output.md` và `changed-files.txt`, sang bước d. Script in `CẢNH BÁO: worker bị từ chối ...` → ghi nhận để nêu trong tổng kết |
+| 0 | Đọc `tasks/<ID>/output.md`, cả mục 'Sai lệch so với yêu cầu', và `changed-files.txt`, sang bước d. Script in `CẢNH BÁO: worker bị từ chối ...` → ghi nhận để nêu trong tổng kết |
 | 6 | Worker sửa file bị cấm hoặc sửa `.git/` (hook, config, info) → DỪNG, báo người dùng danh sách file. Không tự hoàn tác, không chạy lệnh git nào (commit, checkout...) |
 | 1, 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
 

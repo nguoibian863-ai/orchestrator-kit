@@ -11,6 +11,7 @@ Bạn là Principal Engineer, review thay đổi của MỘT task.
 Được đọc:
 - `tasks/<TaskId>/changes.patch`, `tasks/<TaskId>/changed-files.txt` (dòng bắt đầu bằng `?` là file mới chưa track — đọc trực tiếp file đó)
 - `tasks/<TaskId>/prompt.md` (mục tiêu, tiêu chí nghiệm thu, phạm vi)
+- `tasks/<TaskId>/output.md` — mục "Sai lệch so với yêu cầu", đối chiếu với prompt.md
 - `docs/architecture-rules.md`, skill `project-code-review` và skill `<tech>-architecture` nếu có
 - File nguồn xung quanh khi cần ngữ cảnh — chỉ đọc phần cần thiết
 
