@@ -44,9 +44,9 @@ Feature cần làm: $ARGUMENTS
 
 | Mã | Xử lý |
 |---|---|
-| 0 | Đọc `tasks/<ID>/output.md` và `changed-files.txt`, sang bước d |
-| 6 | Worker sửa file bị cấm → DỪNG, báo người dùng danh sách file. Không tự hoàn tác |
-| 3, 5, 7, 124, 1 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
+| 0 | Đọc `tasks/<ID>/output.md` và `changed-files.txt`, sang bước d. Script in `CẢNH BÁO: worker bị từ chối ...` → ghi nhận để nêu trong tổng kết |
+| 6 | Worker sửa file bị cấm hoặc sửa `.git/` (hook, config, info) → DỪNG, báo người dùng danh sách file. Không tự hoàn tác, không chạy lệnh git nào (commit, checkout...) |
+| 1, 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
 
 **d. Kiểm tra tự động** — `scripts/run-checks.ps1 -TaskId <ID>`:
 - 0 → `scripts/update-state.ps1 -TaskId <ID> -Status checked`, sang bước e.

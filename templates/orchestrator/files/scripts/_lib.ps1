@@ -255,6 +255,125 @@ function Show-Violations($Violations) {
     $Violations | ForEach-Object { Write-Host "  $($_.Status) $($_.Path)" }
 }
 
+# Các vị trí trong git có thể chạy lệnh hoặc che file khỏi kiểm tra phạm vi. GỌI TRƯỚC khi chạy worker (có gọi git).
+# Trả về mảng [pscustomobject]@{ Kind = 'config'|'hooks'|'info'|'hooksPath'; Path = <đường dẫn tuyệt đối>; IsDir = <bool> }
+function Get-GitWatchRoots {
+    $commonResult = Invoke-Git 'rev-parse --git-common-dir'
+    if ($commonResult.ExitCode -ne 0) { throw "git rev-parse --git-common-dir lỗi: $($commonResult.StdErr)" }
+    $common = $commonResult.StdOut.Trim()
+    if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $script:ProjectRoot $common }
+    $common = [IO.Path]::GetFullPath($common)
+
+    $roots = @(
+        [pscustomobject]@{ Kind = 'config'; Path = [IO.Path]::GetFullPath((Join-Path $common 'config')); IsDir = $false },
+        [pscustomobject]@{ Kind = 'hooks'; Path = [IO.Path]::GetFullPath((Join-Path $common 'hooks')); IsDir = $true },
+        [pscustomobject]@{ Kind = 'info'; Path = [IO.Path]::GetFullPath((Join-Path $common 'info')); IsDir = $true }
+    )
+
+    $hooksResult = Invoke-Git 'config --get core.hooksPath'
+    $hooksPath = if ($hooksResult.ExitCode -eq 0) { $hooksResult.StdOut.Trim() } else { '' }
+    if ($hooksPath) {
+        if ($hooksPath -match '^~[\\/]') { $hooksPath = Join-Path $HOME $hooksPath.Substring(2) }
+        $topResult = Invoke-Git 'rev-parse --show-toplevel'
+        if ($topResult.ExitCode -ne 0) { throw "git rev-parse --show-toplevel lỗi: $($topResult.StdErr)" }
+        $top = [IO.Path]::GetFullPath($topResult.StdOut.Trim())
+        if (-not [IO.Path]::IsPathRooted($hooksPath)) { $hooksPath = Join-Path $top $hooksPath }
+        $hooksPath = [IO.Path]::GetFullPath($hooksPath)
+        $sameAsRoot = @($roots | Where-Object { $_.Path.Equals($hooksPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if (-not $sameAsRoot -and -not $hooksPath.Equals($top, [StringComparison]::OrdinalIgnoreCase)) {
+            $roots += [pscustomobject]@{ Kind = 'hooksPath'; Path = $hooksPath; IsDir = $true }
+        }
+    }
+    return ,$roots
+}
+
+# Chuyển đường dẫn giám sát thành đường dẫn hiển thị tương đối nếu nó nằm trong project.
+function ConvertTo-GitWatchDisplayPath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetFullPath($script:ProjectRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $prefix = $root + [IO.Path]::DirectorySeparatorChar
+    if ($full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        return $full.Substring($prefix.Length).Replace('\', '/')
+    }
+    return $full
+}
+
+# Dấu vân tay các file trong $Roots. Không gọi git, không ném lỗi khi thư mục/file không tồn tại.
+# Trả về [hashtable]: khoá = đường dẫn hiển thị, giá trị = [pscustomobject]@{ Hash = <SHA256 hex | 'UNREADABLE'>; Kind = <Kind của root> }
+function Get-GitDirSnapshot([object[]]$Roots) {
+    $snapshot = @{}
+    foreach ($root in $Roots) {
+        $files = @()
+        if ($root.IsDir) {
+            if (Test-Path -LiteralPath $root.Path -PathType Container) {
+                $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+            }
+        } elseif (Test-Path -LiteralPath $root.Path -PathType Leaf) {
+            $files = @(Get-Item -LiteralPath $root.Path -Force)
+        }
+        foreach ($file in $files) {
+            $display = ConvertTo-GitWatchDisplayPath $file.FullName
+            $hash = 'UNREADABLE'
+            try { $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash }
+            catch { $hash = 'UNREADABLE' }
+            $snapshot[$display] = [pscustomobject]@{ Hash = $hash; Kind = [string]$root.Kind }
+        }
+    }
+    return $snapshot
+}
+
+# So sánh hai dấu vân tay, trả về thay đổi theo đường dẫn hiển thị.
+function Compare-GitDirSnapshot($Before, $After) {
+    $changes = New-Object System.Collections.ArrayList
+    $paths = @(@($Before.Keys) + @($After.Keys) | Sort-Object -Unique)
+    foreach ($path in $paths) {
+        $beforeHas = $Before.ContainsKey($path)
+        $afterHas = $After.ContainsKey($path)
+        if (-not $beforeHas) {
+            [void]$changes.Add([pscustomobject]@{ Status = 'A'; Path = [string]$path; Kind = [string]$After[$path].Kind })
+        } elseif (-not $afterHas) {
+            [void]$changes.Add([pscustomobject]@{ Status = 'D'; Path = [string]$path; Kind = [string]$Before[$path].Kind })
+        } elseif ($Before[$path].Hash -ne $After[$path].Hash) {
+            [void]$changes.Add([pscustomobject]@{ Status = 'M'; Path = [string]$path; Kind = [string]$After[$path].Kind })
+        }
+    }
+    return @($changes | Sort-Object Path)
+}
+
+# In danh sách thay đổi .git theo định dạng cố định.
+function Show-GitDirChanges($Changes) {
+    Write-Host 'Worker đã thay đổi thư mục git (hook/cấu hình — có thể chạy lệnh khi commit/checkout):'
+    $Changes | ForEach-Object { Write-Host "  $($_.Status) $($_.Path)" }
+}
+
+# Tìm JSON envelope của worker (agy --output-format json) trong stdout. Không bao giờ ném lỗi.
+# Trả về PSCustomObject đầu tiên có thuộc tính 'status' hoặc 'response'; không có -> $null.
+function ConvertFrom-WorkerEnvelope([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    try { $trimmed = $Text.Trim() } catch { return $null }
+    $matches = [regex]::Matches($trimmed, '(?m)^[\t ]*\{')
+    $count = [Math]::Min(20, $matches.Count)
+    $lastBrace = $trimmed.LastIndexOf('}')
+    for ($i = 0; $i -lt $count; $i++) {
+        $start = $matches[$i].Index + $matches[$i].Length - 1
+        $lineEnd = $trimmed.IndexOf("`n", $start)
+        if ($lineEnd -lt 0) { $lineEnd = $trimmed.Length }
+        $candidates = @($trimmed.Substring($start, $lineEnd - $start))
+        if ($lastBrace -ge $start -and $lastBrace -ge $lineEnd) {
+            $candidates += $trimmed.Substring($start, $lastBrace - $start + 1)
+        }
+        foreach ($candidate in $candidates) {
+            try {
+                $parsed = ConvertFrom-Json -InputObject $candidate -ErrorAction Stop
+                if ($parsed -is [System.Management.Automation.PSCustomObject] -and ((Test-Prop $parsed 'status') -or (Test-Prop $parsed 'response'))) {
+                    return $parsed
+                }
+            } catch { }
+        }
+    }
+    return $null
+}
+
 # ---------- State ----------
 
 function Get-TaskEntry([string]$TaskId) {

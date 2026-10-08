@@ -8,6 +8,10 @@
 
 Cập nhật v3.1: worker trung tính (`run-gemini.ps1` → `run-worker.ps1`, `gemini.log` → `worker.log`, `gemini-prompt.md` → `worker-prompt.md`); cấu hình nhiều worker có tên, chọn bằng `"worker": "<tên>"` hoặc `-Worker <tên>`; mặc định chuyển sang Antigravity CLI vì Gemini CLI đăng nhập bằng tài khoản Google cá nhân bị từ chối (`IneligibleTierError`).
 
+Cập nhật v3.2: `run-worker.ps1` chụp dấu vân tay `.git/config`, `.git/hooks/**`, `.git/info/**` và `core.hooksPath` trước/sau worker; thay đổi `.git` trả mã 6 và không chạy lệnh git hậu xử lý khi `.git/config` hoặc `.git/info` đổi.
+
+Cập nhật v3.3: worker có khoá `output`; `agy` mặc định dùng JSON envelope để phân biệt bị từ chối, không trả lời và status lỗi. Thứ tự mã thoát của `run-worker.ps1` là `6 > 124 > 3 > 11 > 10 > 8 > 9 > 5 > 7`.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -53,7 +57,7 @@ Claude (orchestrator) ── đọc/ghi state/ qua script
 
   | Worker | Kiểm tra cài đặt | Đăng nhập | Thử nhanh |
   |---|---|---|---|
-  | `agy` (Antigravity CLI) | `agy --version` (đã thử 1.3.1) | chạy `agy` một lần ở chế độ tương tác | `agy -p "Reply with exactly: PONG"` |
+  | `agy` (Antigravity CLI) | `agy --version` (đã thử 1.3.1) | chạy `agy` một lần ở chế độ tương tác | `agy --output-format json -p "Reply with exactly: PONG"` → thấy `"status":"SUCCESS"` |
   | `codex` (Codex CLI) | `codex --version` (đã thử 0.160.0) | `codex login` bằng tài khoản ChatGPT | `echo "Reply with exactly: PONG" \| codex exec -` |
   | `gemini-cli` | `gemini --version` | API key `GEMINI_API_KEY` (đăng nhập Google cá nhân có thể bị từ chối: `IneligibleTierError`) | `echo hi \| gemini -p "reply OK"` |
 - **git**, và project phải là git repo có ít nhất một commit trước task đầu tiên.
@@ -121,12 +125,14 @@ Gọi từ gốc project: `powershell -NoProfile -ExecutionPolicy Bypass -File s
 | `update-workflow.ps1 -Feature <tên> -Phase <phase> [-Force]` | Bắt đầu feature / đổi phase | 0 ok · 3 đang có feature dang dở |
 | `update-state.ps1 -TaskId <ID> -Status <s> [-IncrementFixAttempts] [-Title <t>]` | Đổi status task | 0 ok · 3 hết lượt fix → `blocked` |
 | `start-task.ps1 -TaskId <ID>` | Tạo/chuyển nhánh `feature/<ID>`, ghi `base_commit` | 0 ok · 1 lỗi (chưa git, chưa commit, cây bẩn...) |
-| `run-worker.ps1 -TaskId <ID> [-Worker <tên>]` | Gọi worker với `tasks/<ID>/prompt.md` | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm · 7 không đổi file nào · 124 quá giờ |
+| `run-worker.ps1 -TaskId <ID> [-Worker <tên>]` | Gọi worker với `tasks/<ID>/prompt.md` | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm/.git · 7 không đổi file nào · 8 bị từ chối, không trả lời · 9 không trả lời · 10 status khác SUCCESS · 11 không phải JSON · 124 quá giờ |
 | `run-checks.ps1 [-TaskId <ID>]` | Chạy `checks` theo thứ tự | 0 PASS · 1 FAIL/quá giờ · 2 chưa cấu hình |
 | `run-review.ps1 -TaskId <ID>` | Gộp 3 báo cáo, đếm mức độ | 0 đạt · 1 còn CRITICAL/HIGH · 2 thiếu báo cáo |
 | `collect-changes.ps1 -TaskId <ID>` | Tạo lại diff + kiểm tra phạm vi (sau khi sửa tay) | 0 ok · 6 sửa file cấm |
 
 `run-worker.ps1` có thể chạy tới `worker.timeout_sec` giây (mặc định 540, vừa trong giới hạn 600 giây của một lệnh shell trong Claude Code). Tăng quá 540 thì phải chạy script ở chế độ nền.
+
+Khi có nhiều điều kiện cùng lúc, ưu tiên mã thoát là `6 > 124 > 3 > 11 > 10 > 8 > 9 > 5 > 7`. Mã 8–11 chỉ áp dụng khi worker đặt `"output": "agy-json"`.
 
 ## 7. State
 
@@ -150,22 +156,32 @@ Quy tắc: đọc `state/` trước mỗi bước; chỉ ghi qua script; phiên 
 ```json
 "worker": "agy",
 "workers": {
-  "agy":        { "command": "agy",    "args": ["--print-timeout", "8m", "-p", "Read the file {prompt_file} ... exactly. ..."], "stdin_prompt": false, "timeout_sec": 540 },
-  "codex":      { "command": "codex",  "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],         "stdin_prompt": true,  "timeout_sec": 540 },
-  "gemini-cli": { "command": "gemini", "args": ["--approval-mode", "auto_edit", "--skip-trust", "-p", "Follow ..."],       "stdin_prompt": true,  "timeout_sec": 540 }
+  "agy": {
+    "command": "agy",
+    "args": ["--output-format", "json", "--effort", "high", "--print-timeout", "8m", "-p", "Read the file {prompt_file} in this workspace and carry out every instruction in it exactly. Your final reply must follow the response format defined in that file."],
+    "output": "agy-json", "stdin_prompt": false, "timeout_sec": 540
+  },
+  "codex":      { "command": "codex",  "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],         "output": "text", "stdin_prompt": true,  "timeout_sec": 540 },
+  "gemini-cli": { "command": "gemini", "args": ["--approval-mode", "auto_edit", "--skip-trust", "-p", "Follow ..."],       "output": "text", "stdin_prompt": true,  "timeout_sec": 540 }
 }
 ```
+
+`workers.<tên>.output` nhận `"text"` (mặc định nếu thiếu, `null` hoặc rỗng) hoặc `"agy-json"`; so sánh không phân biệt hoa thường sau `Trim()`. Giá trị khác trả mã 1. Chế độ `text` tách marker từ stdout như trước. Chế độ `agy-json` tìm JSON envelope, lấy `response` để tách marker và ghi `conversation_id`, `status`, `usage`, `denied_actions` vào `worker.log`.
+
+Phân loại `agy-json`: stdout rỗng → 9; không có envelope → 11; `status` khác `SUCCESS` → 10; response rỗng cùng `denied_actions` → 8; response rỗng không có hành động bị từ chối → 9. Envelope thành công có response thì xử lý marker bình thường; có hành động bị từ chối nhưng vẫn có response sẽ hiện cảnh báo và tiếp tục.
 
 - Đổi worker cho cả dự án: sửa `"worker"`. Đổi cho một lần chạy: `run-worker.ps1 -TaskId <ID> -Worker codex`.
 - Prompt dài nên không bao giờ nằm trên dòng lệnh. `stdin_prompt: true` → nội dung `prompt.md` được đưa vào stdin (Codex, Gemini). `stdin_prompt: false` → chỉ truyền đường dẫn qua `{prompt_file}` để worker tự đọc file (agy chỉ nhận prompt qua tham số). Trong `args`, `{prompt_file}` → `tasks/<ID>/prompt.md`, `{task_id}` → `<ID>`. Tham số không được chứa ký tự xuống dòng.
 - Quyền của từng worker:
-  - `agy` headless: tự cho đọc/ghi file trong workspace, từ chối lệnh shell (không có chế độ hỏi). `--print-timeout 8m` để agy tự dừng trước giới hạn 540 giây của script.
+  - `agy` headless: tự cho đọc/ghi file trong workspace, từ chối lệnh shell (không có chế độ hỏi). `--print-timeout 8m` để agy tự dừng trước giới hạn 540 giây của script. Mặc định `--effort high`; hạ mức bằng cách đổi giá trị sau `--effort` thành `low`, `medium`, `high`, `xhigh` hoặc `max`. Có thể thêm `"--model", "<tên>"` vào `args` để chọn model.
   - `codex` `workspace-write`: ghi được trong workspace, lệnh shell chạy trong sandbox. Không dùng `--dangerously-bypass-approvals-and-sandbox`.
   - `gemini-cli` `auto_edit`: chỉ sửa file, không chạy shell. Không dùng `yolo`.
 - `env` nhận giá trị dạng `"${env:TEN_BIEN}"` để lấy từ biến môi trường — không ghi key vào file.
 - Thêm worker khác: thêm một mục vào `workers`. Worker phải tự sửa file trong repo và in kết quả giữa `## OUTPUT_START` … `## OUTPUT_END`. Worker chỉ trả text (ví dụ gọi HTTP qua 9Router) cần thêm bước tách file từ output — chưa có trong bộ mẫu này.
 
 Kiểm tra phạm vi (tự động sau mỗi lần chạy worker): mọi file thay đổi so với `base_commit` (kể cả file mới chưa track) được so với `scope.always_protected` + `tasks/<ID>/do-not-modify.txt`. Glob: `*` không qua `/`, `**` qua mọi cấp, `thu-muc/` = mọi thứ bên trong. `tasks/`, `reviews/`, `state/` không tính (do script ghi).
+
+`output` có thể đặt về `"text"` để dùng cách đọc stdout cũ; khi đó bỏ `--output-format json` khỏi `agy` args. Nếu agy `--effort high` thường hết `--print-timeout 8m` (mã 9), hạ mức effort trong args.
 
 ## 9. Kiểm tra tự động
 
@@ -221,7 +237,8 @@ Trước task đầu tiên: điền `checks`, `git init` + commit khung (Claude 
 
 - Script chỉ hỗ trợ Windows (dùng `cmd.exe`, `taskkill`).
 - `agy -p` từng có lỗi treo khi chạy với output chuyển hướng trên Windows (issue #318 của antigravity-cli, bản 1.0.6). Bản 1.3.1 đã chạy được qua script; nếu bản khác bị treo, script vẫn dừng ở `timeout_sec` và trả mã 124.
-- Kiểm tra phạm vi dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác.
+- Phát hiện file cấm dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác. Riêng `.git/config`, `.git/hooks/**`, `.git/info/**` và `core.hooksPath` được chụp trước/sau worker; nếu `.git/config` hoặc `.git/info/**` đổi, script bỏ qua `git diff` và không chạy lệnh git nào trước khi người dùng kiểm tra.
+- Giới hạn đã biết (R10): chưa phát hiện worker sửa `.gitignore` để che file mới trong thư mục cấm, ghi file ra ngoài workspace bằng đường dẫn tuyệt đối, hoặc sửa `refs/`, `HEAD`, `index`.
 - Thay đổi trong `tasks/`, `reviews/`, `state/` không được kiểm tra phạm vi.
 - Script đếm phát hiện dựa trên định dạng báo cáo; agent viết sai định dạng sẽ bị đếm sai — Claude vẫn phải đọc báo cáo tổng hợp khi kết quả đáng ngờ.
 
