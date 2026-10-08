@@ -16,6 +16,8 @@ Cập nhật v3.4: 3 agent review ghi nhãn độ tin cậy cho từng phát hi�
 
 Cập nhật v3.5: bổ sung mẫu prompt worker, fix-prompt và agent planner với "File mẫu để bắt chước", "Hợp đồng nguyên văn", quy tắc không sửa test có sẵn, test đường lỗi và mục output "Sai lệch so với yêu cầu"; reviewer và qa đối chiếu mục này với prompt.
 
+Cập nhật v3.6: worker `agy` mặc định thêm `--mode accept-edits` (không tương tác mới ghi được file).
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -23,7 +25,7 @@ Cập nhật v3.5: bổ sung mẫu prompt worker, fix-prompt và agent planner v
 | `run-gemini.ps1` không bắt mã lỗi của worker, khai báo timeout nhưng không dùng | Kiểm tra mã thoát, timeout thật (giết cả cây tiến trình), mã thoát riêng cho từng tình huống |
 | `$ErrorActionPreference=Stop` + `2>&1` làm chết script trên PowerShell 5.1 khi Gemini in cảnh báo | Gọi tiến trình qua `System.Diagnostics.Process`, chạy được trên cả PowerShell 5.1 và 7 |
 | State ghi có BOM (Node đọc lỗi), nhận status gõ sai, không khoá file | UTF-8 không BOM, `ValidateSet`, khoá độc quyền khi đọc-sửa-ghi |
-| "Do Not Modify" chỉ là lời dặn, `--yolo` cho Gemini toàn quyền | Worker chỉ được sửa file (agy headless / Gemini `auto_edit`) hoặc chạy shell trong sandbox (Codex `workspace-write`); sau mỗi lần chạy, script đối chiếu `git diff` với danh sách cấm |
+| "Do Not Modify" chỉ là lời dặn, `--yolo` cho Gemini toàn quyền | Worker chỉ được sửa file (agy `--mode accept-edits` / Gemini `auto_edit`) hoặc chạy shell trong sandbox (Codex `workspace-write`); sau mỗi lần chạy, script đối chiếu `git diff` với danh sách cấm |
 | Nói "mỗi task một branch" nhưng không có bước nào tạo branch | `start-task.ps1` tạo nhánh + ghi commit gốc; `run-worker.ps1` từ chối chạy nếu sai nhánh hoặc trên `main` |
 | Check FAIL quay lại sửa mà không tính lượt → có thể lặp vô hạn | Mọi vòng fix (do checks hay review) đều qua `-IncrementFixAttempts`; vượt giới hạn script tự chuyển `blocked`, trả exit 3 |
 | `/init-orchestrator` để Claude gõ lại ~15 KB file mẫu | `scaffold.ps1` chép file thật trong 1 giây, không ghi đè, chặn thư mục không trống |
@@ -61,7 +63,7 @@ Claude (orchestrator) ── đọc/ghi state/ qua script
 
   | Worker | Kiểm tra cài đặt | Đăng nhập | Thử nhanh |
   |---|---|---|---|
-  | `agy` (Antigravity CLI) | `agy --version` (đã thử 1.3.1) | chạy `agy` một lần ở chế độ tương tác | `agy --output-format json -p "Reply with exactly: PONG"` → thấy `"status":"SUCCESS"` |
+  | `agy` (Antigravity CLI) | `agy --version` (đã thử 1.3.1) | chạy `agy` một lần ở chế độ tương tác (đăng nhập); quyền ghi file do `--mode accept-edits` trong config lo | `agy --output-format json -p "Reply with exactly: PONG"` → thấy `"status":"SUCCESS"` |
   | `codex` (Codex CLI) | `codex --version` (đã thử 0.160.0) | `codex login` bằng tài khoản ChatGPT | `echo "Reply with exactly: PONG" \| codex exec -` |
   | `gemini-cli` | `gemini --version` | API key `GEMINI_API_KEY` (đăng nhập Google cá nhân có thể bị từ chối: `IneligibleTierError`) | `echo hi \| gemini -p "reply OK"` |
 - **git**, và project phải là git repo có ít nhất một commit trước task đầu tiên.
@@ -177,7 +179,7 @@ Phân loại `agy-json`: stdout rỗng → 9; không có envelope → 11; `statu
 - Đổi worker cho cả dự án: sửa `"worker"`. Đổi cho một lần chạy: `run-worker.ps1 -TaskId <ID> -Worker codex`.
 - Prompt dài nên không bao giờ nằm trên dòng lệnh. `stdin_prompt: true` → nội dung `prompt.md` được đưa vào stdin (Codex, Gemini). `stdin_prompt: false` → chỉ truyền đường dẫn qua `{prompt_file}` để worker tự đọc file (agy chỉ nhận prompt qua tham số). Trong `args`, `{prompt_file}` → `tasks/<ID>/prompt.md`, `{task_id}` → `<ID>`. Tham số không được chứa ký tự xuống dòng.
 - Quyền của từng worker:
-  - `agy` headless: tự cho đọc/ghi file trong workspace, từ chối lệnh shell (không có chế độ hỏi). `--print-timeout 8m` để agy tự dừng trước giới hạn 540 giây của script. Mặc định `--effort high`; hạ mức bằng cách đổi giá trị sau `--effort` thành `low`, `medium`, `high`, `xhigh` hoặc `max`. Có thể thêm `"--model", "<tên>"` vào `args` để chọn model.
+  - `agy`: mặc định hỏi quyền cho mỗi lần ghi file (`toolPermission=request-review`); khi chạy `-p` không ai trả lời nên agy tự từ chối `write_file`. `--mode accept-edits` cho phép sửa file, lệnh shell vẫn bị từ chối. Thêm thư mục vào `trustedWorkspaces` hay cấp quyền tương tác một lần đều không thay được tuỳ chọn này. `--print-timeout 8m` để agy tự dừng trước giới hạn 540 giây của script. Không bao giờ dùng `--dangerously-skip-permissions`.
   - `codex` `workspace-write`: ghi được trong workspace, lệnh shell chạy trong sandbox. Không dùng `--dangerously-bypass-approvals-and-sandbox`.
   - `gemini-cli` `auto_edit`: chỉ sửa file, không chạy shell. Không dùng `yolo`.
 - `env` nhận giá trị dạng `"${env:TEN_BIEN}"` để lấy từ biến môi trường — không ghi key vào file.

@@ -22,7 +22,7 @@ Tham số: $ARGUMENTS
 5. Nếu người dùng đã nói lệnh lint/build/test → điền mảng `checks` trong `orchestrator.config.json` theo mẫu `checks_example`. Chưa biết thì để trống.
 6. Không `git init`, không commit, trừ khi người dùng yêu cầu.
 7. Cây thư mục đã được script in ra. Nhắc người dùng những việc còn lại trước task đầu tiên:
-   - Đăng nhập worker đang chọn nếu chưa: `agy` (chạy `agy` một lần ở chế độ tương tác) hoặc `codex` (`codex login` bằng tài khoản ChatGPT).
+   - Đăng nhập worker đang chọn nếu chưa: `agy` (chạy `agy` một lần ở chế độ tương tác) — config đã có `--mode accept-edits` để agy ghi được file khi chạy không tương tác hoặc `codex` (`codex login` bằng tài khoản ChatGPT).
    - Điền `checks` trong `orchestrator.config.json`.
    - `git init` và commit khung (cần ít nhất một commit trước khi `start-task.ps1` tạo nhánh).
    - `docs/`, `memory/`, `.claude/skills/*` hiện chỉ là khung rỗng, sẽ được điền dần khi có task thật.
