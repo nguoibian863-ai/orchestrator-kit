@@ -18,6 +18,8 @@ Cập nhật v3.5: bổ sung mẫu prompt worker, fix-prompt và agent planner v
 
 Cập nhật v3.6: worker `agy` mặc định thêm `--mode accept-edits` (không tương tác mới ghi được file).
 
+Cập nhật v3.7: `run-task.ps1` và `finish-task.ps1` gói các bước của một task (orchestrator gọi 2 lệnh thay vì ~8); `run-checks.ps1` không in lại dòng lệnh của từng bước.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -130,6 +132,8 @@ Gọi từ gốc project: `powershell -NoProfile -ExecutionPolicy Bypass -File s
 |---|---|---|
 | `update-workflow.ps1 -Feature <tên> -Phase <phase> [-Force]` | Bắt đầu feature / đổi phase | 0 ok · 3 đang có feature dang dở |
 | `update-state.ps1 -TaskId <ID> -Status <s> [-IncrementFixAttempts] [-Title <t>]` | Đổi status task | 0 ok · 3 hết lượt fix → `blocked` |
+| `run-task.ps1 -TaskId <ID> [-Worker <tên>] [-Fix]` | Gói start-task → implementing/fixing → worker → checks → checked | 0 ok · mã nguyên văn của bước lỗi |
+| `finish-task.ps1 -TaskId <ID> -Message <mô tả>` | Gói reviewing → review → approved + commit | 0 ok · 1 còn CRITICAL/HIGH · 2 thiếu báo cáo · 3 hết lượt fix |
 | `start-task.ps1 -TaskId <ID>` | Tạo/chuyển nhánh `feature/<ID>`, ghi `base_commit` | 0 ok · 1 lỗi (chưa git, chưa commit, cây bẩn...) |
 | `run-worker.ps1 -TaskId <ID> [-Worker <tên>]` | Gọi worker với `tasks/<ID>/prompt.md` | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm/.git · 7 không đổi file nào · 8 bị từ chối, không trả lời · 9 không trả lời · 10 status khác SUCCESS · 11 không phải JSON · 124 quá giờ |
 | `run-checks.ps1 [-TaskId <ID>]` | Chạy `checks` theo thứ tự | 0 PASS · 1 FAIL/quá giờ · 2 chưa cấu hình |

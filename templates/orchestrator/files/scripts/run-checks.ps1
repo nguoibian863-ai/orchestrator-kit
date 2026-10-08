@@ -19,7 +19,7 @@ foreach ($c in $checks) {
     if (-not $command) { Fail 2 "Bước '$name' thiếu 'command'." }
     $timeout = [int](Get-Prop $c 'timeout_sec' 600)
 
-    Write-Host "== $name`: $command"
+    Write-Host "== $name"
     $r = Invoke-Cmd -CommandLine $command -TimeoutSec $timeout
     [void]$log.AppendLine("===== $name | exit $($r.ExitCode)$(if ($r.TimedOut) { ' | TIMEOUT' }) | $command =====")
     [void]$log.AppendLine($r.StdOut)

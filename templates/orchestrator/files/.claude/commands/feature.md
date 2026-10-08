@@ -36,35 +36,28 @@ Feature cần làm: $ARGUMENTS
 
 `scripts/update-workflow.ps1 -Phase implementing`, rồi với mỗi task `<ID>`:
 
-**a. Nhánh riêng** — `scripts/start-task.ps1 -TaskId <ID>`. Mã khác 0 → dừng, báo người dùng nguyên văn lỗi.
+**a. Prompt** — viết `tasks/<ID>/prompt.md` theo `.claude/orchestrator/worker-prompt.md` (điền 'File mẫu để bắt chước' và 'Hợp đồng nguyên văn' từ plan.md, chép nguyên văn), và `tasks/<ID>/do-not-modify.txt` (mỗi dòng một glob, lấy từ "Không được sửa" trong plan).
 
-**b. Prompt** — viết `tasks/<ID>/prompt.md` theo `.claude/orchestrator/worker-prompt.md` (điền 'File mẫu để bắt chước' và 'Hợp đồng nguyên văn' từ plan.md, chép nguyên văn), và `tasks/<ID>/do-not-modify.txt` (mỗi dòng một glob, lấy từ "Không được sửa" trong plan).
-
-**c. Worker** — `scripts/update-state.ps1 -TaskId <ID> -Status implementing`, rồi `scripts/run-worker.ps1 -TaskId <ID>`. Worker mặc định theo `"worker"` trong `orchestrator.config.json`; chỉ thêm `-Worker <tên>` (ví dụ `codex`, `agy`, `gemini-cli`) khi người dùng yêu cầu worker khác:
+**b. Worker và checks** — `scripts/run-task.ps1 -TaskId <ID>`. Worker mặc định theo `"worker"` trong `orchestrator.config.json`; chỉ thêm `-Worker <tên>` (ví dụ `codex`, `agy`, `gemini-cli`) khi người dùng yêu cầu worker khác:
 
 | Mã | Xử lý |
 |---|---|
-| 0 | Đọc `tasks/<ID>/output.md`, cả mục 'Sai lệch so với yêu cầu', và `changed-files.txt`, sang bước d. Script in `CẢNH BÁO: worker bị từ chối ...` → ghi nhận để nêu trong tổng kết |
+| 0 | Worker và checks đạt. Đọc `tasks/<ID>/output.md`, cả mục 'Sai lệch so với yêu cầu', và `changed-files.txt`, sang bước c. Nếu `worker.log` ghi nhận hành động bị từ chối, ghi nhận để nêu trong tổng kết. |
+| 1 (checks) | Sang bước e. Đọc 15 dòng cuối script in ra; log đầy đủ ở `tasks/<ID>/checks.log`. |
+| 2 (checks) | Hỏi người dùng lệnh kiểm tra, điền `checks`, chạy lại bước b. |
 | 6 | Worker sửa file bị cấm hoặc sửa `.git/` (hook, config, info) → DỪNG, báo người dùng danh sách file. Không tự hoàn tác, không chạy lệnh git nào (commit, checkout...) |
-| 1, 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
+| 1 (run-worker), 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
 
-**d. Kiểm tra tự động** — `scripts/run-checks.ps1 -TaskId <ID>`:
-- 0 → `scripts/update-state.ps1 -TaskId <ID> -Status checked`, sang bước e.
-- 1 → sang bước g, lỗi lấy từ phần cuối log mà script in ra (log đầy đủ: `tasks/<ID>/checks.log`).
-- 2 → hỏi người dùng lệnh kiểm tra, điền `checks`, chạy lại bước d.
+**c. Review** — `scripts/update-workflow.ps1 -Phase review-loop`. Gọi **song song** 3 subagent `reviewer`, `security`, `qa` với TaskId; mỗi agent tự ghi `tasks/<ID>/<tên>-output.md`.
 
-**e. Review** — `scripts/update-state.ps1 -TaskId <ID> -Status reviewing` và `scripts/update-workflow.ps1 -Phase review-loop`. Gọi **song song** 3 subagent `reviewer`, `security`, `qa` với TaskId; mỗi agent tự ghi `tasks/<ID>/<tên>-output.md`.
+**d. Tổng hợp và duyệt** — `scripts/finish-task.ps1 -TaskId <ID> -Message "<mô tả ngắn>"`. Script tự cập nhật reviewing, tổng hợp review, rồi chỉ khi đạt mới cập nhật approved và commit `[worker] <ID>: <mô tả ngắn>`. Nếu in `Chú ý: ... conf:LOW`, ghi vào Nợ kỹ thuật, không tự chặn. Không merge. Task kế tiếp sẽ tách nhánh từ nhánh này.
 
-**f. Tổng hợp** — `scripts/run-review.ps1 -TaskId <ID>`:
-- 0 → sang bước h; nếu script in `Chú ý: ... conf:LOW` → ghi vào Nợ kỹ thuật, không tự chặn.
-- 1 → còn CRITICAL/HIGH, sang bước g.
-- 2 → thiếu báo cáo: gọi lại đúng agent còn thiếu.
-
-**g. Fix** — `scripts/update-state.ps1 -TaskId <ID> -Status fixing -IncrementFixAttempts`:
-- 3 → đã hết lượt, task chuyển `blocked`: `scripts/update-workflow.ps1 -Phase blocked`, ghi `reviews/<ID>-summary.md` (lịch sử các vòng + vấn đề còn tồn đọng + hướng xử lý thủ công đề xuất), DỪNG cả feature, báo người dùng.
-- 0 → ghi đè `tasks/<ID>/prompt.md` bằng fix-prompt theo `.claude/orchestrator/fix-prompt.md` (bản cũ đã được lưu trong `tasks/<ID>/history/`), quay lại bước c.
-
-**h. Duyệt** — `scripts/update-state.ps1 -TaskId <ID> -Status approved`, rồi commit trên nhánh task: `git add -A` và `git commit -m "[worker] <ID>: <mô tả ngắn>"`. Không merge. Task kế tiếp sẽ tách nhánh từ nhánh này.
+**e. Fix** — mã 1 của `finish-task` (còn CRITICAL/HIGH) hoặc mã 1 của `run-task` tại `run-checks`:
+- Ghi đè `tasks/<ID>/prompt.md` bằng fix-prompt theo `.claude/orchestrator/fix-prompt.md` (bản cũ đã được lưu trong `tasks/<ID>/history/`), rồi chạy `scripts/run-task.ps1 -TaskId <ID> -Fix`.
+- Mã 0 → quay lại bước c. Nếu script dừng ở `run-checks` với mã 1 thì lặp lại bước e sau khi cập nhật fix-prompt.
+- Mã 3 → đã hết lượt, task chuyển `blocked`: `scripts/update-workflow.ps1 -Phase blocked`, ghi `reviews/<ID>-summary.md` (lịch sử các vòng + vấn đề còn tồn đọng + hướng xử lý thủ công đề xuất), DỪNG cả feature, báo người dùng.
+- Mã 2 từ `finish-task` → thiếu báo cáo: gọi lại đúng agent còn thiếu ở bước c, rồi chạy lại bước d. Mã 2 từ `run-task` tại `run-checks` → hỏi người dùng lệnh kiểm tra, cập nhật `checks`, chạy lại bước b.
+- Mã khác → dừng, báo người dùng mã và thông điệp của script; không tự đoán kết quả.
 
 ## 4. Kết thúc feature
 
