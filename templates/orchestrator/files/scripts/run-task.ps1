@@ -100,6 +100,7 @@ if ($Fix) {
 
 $workerArgs = @('-TaskId', $TaskId)
 if ($Worker) { $workerArgs += @('-Worker', $Worker) }
+if ($Fix) { $workerArgs += '-Resume' }
 Invoke-TaskStep -Name 'run-worker' -ScriptName 'run-worker.ps1' -Arguments $workerArgs -TimeoutSec $workerTimeoutSec -LogHint "tasks/$TaskId/worker.log"
 Invoke-TaskStep -Name 'run-checks' -ScriptName 'run-checks.ps1' -Arguments @('-TaskId', $TaskId) -TimeoutSec $checksTimeoutSec -LogHint "tasks/$TaskId/checks.log"
 Invoke-TaskStep -Name 'update-state checked' -ScriptName 'update-state.ps1' -Arguments @('-TaskId', $TaskId, '-Status', 'checked')

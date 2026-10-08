@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Scenario)
+﻿param([Parameter(Mandatory = $true)][string]$Scenario, [string]$Echo)
 
 $ErrorActionPreference = 'Stop'
 $encoding = New-Object System.Text.UTF8Encoding $false
@@ -45,6 +45,7 @@ try {
             default { throw "unknown action: $op" }
         }
     }
+    if ($Echo) { [Console]::Out.WriteLine("echo:$Echo"); [Console]::Out.Flush() }
     $code = 0
     if ($null -ne $data.PSObject.Properties['exit_code']) { $code = [int]$data.exit_code }
     exit $code

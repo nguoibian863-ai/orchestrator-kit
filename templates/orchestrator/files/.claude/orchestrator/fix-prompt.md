@@ -34,3 +34,20 @@ Trả lời DUY NHẤT phần sau, bắt đầu bằng dòng "## OUTPUT_START" v
 3. Rủi ro mới phát sinh (nếu có)
 4. Sai lệch so với yêu cầu (ghi "Không có" nếu không có)
 ## OUTPUT_END
+
+---
+
+## Biến thể khi resume phiên worker (`run-task.ps1 -TaskId <ID> -Fix`)
+
+Khi worker tiếp tục phiên cũ, nó đã có bối cảnh task — prompt chỉ cần phần thay đổi. Ghi `tasks/<ID>/prompt.md` gọn như sau, bỏ "Bối cảnh task", "Do Not Modify", "Out Of Scope" (worker đã biết từ phiên trước):
+
+Bạn đang tiếp tục task <ID> (vòng fix <n>/<max>). Chỉ sửa đúng các lỗi dưới đây — không refactor, không thiết kế lại. Giữ nguyên mọi ràng buộc và danh sách file cấm đã nêu ở phiên trước.
+
+## Các lỗi cần sửa
+### Lỗi 1 — <mức độ> — <tiêu đề>
+- Vấn đề:
+- File liên quan:
+- Yêu cầu sửa cụ thể:
+
+## Định dạng trả lời
+Trả lời DUY NHẤT phần giữa "## OUTPUT_START" và "## OUTPUT_END" như phiên trước.

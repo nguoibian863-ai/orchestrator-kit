@@ -54,6 +54,7 @@ Feature cần làm: $ARGUMENTS
 
 **e. Fix** — mã 1 của `finish-task` (còn CRITICAL/HIGH) hoặc mã 1 của `run-task` tại `run-checks`:
 - Ghi đè `tasks/<ID>/prompt.md` bằng fix-prompt theo `.claude/orchestrator/fix-prompt.md` (bản cũ đã được lưu trong `tasks/<ID>/history/`), rồi chạy `scripts/run-task.ps1 -TaskId <ID> -Fix`.
+- `run-task.ps1 -TaskId <ID> -Fix` tự tiếp tục phiên worker đã lưu; có thể dùng biến thể fix-prompt ngắn khi resume.
 - Mã 0 → quay lại bước c. Nếu script dừng ở `run-checks` với mã 1 thì lặp lại bước e sau khi cập nhật fix-prompt.
 - Mã 3 → đã hết lượt, task chuyển `blocked`: `scripts/update-workflow.ps1 -Phase blocked`, ghi `reviews/<ID>-summary.md` (lịch sử các vòng + vấn đề còn tồn đọng + hướng xử lý thủ công đề xuất), DỪNG cả feature, báo người dùng.
 - Mã 2 từ `finish-task` → thiếu báo cáo: gọi lại đúng agent còn thiếu ở bước c, rồi chạy lại bước d. Mã 2 từ `run-task` tại `run-checks` → hỏi người dùng lệnh kiểm tra, cập nhật `checks`, chạy lại bước b.

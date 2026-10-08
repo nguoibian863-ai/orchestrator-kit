@@ -25,7 +25,8 @@
 #   124 = quá thời gian, đã dừng cả cây tiến trình
 param(
     [Parameter(Mandatory = $true)][string]$TaskId,
-    [string]$Worker
+    [string]$Worker,
+    [switch]$Resume
 )
 . (Join-Path $PSScriptRoot '_lib.ps1')
 Assert-TaskId $TaskId
@@ -70,11 +71,36 @@ $current = (Invoke-Git 'rev-parse --abbrev-ref HEAD').StdOut.Trim()
 if ($protectedBranches -contains $current) { Fail 1 "Không chạy worker trên nhánh được bảo vệ '$current'." }
 if ($current -ne $branch) { Fail 1 "Đang ở nhánh '$current' nhưng task $TaskId thuộc nhánh '$branch'. Chạy lại start-task." }
 
-# 2. Chuẩn bị lệnh. Prompt dài nên không nhét vào dòng lệnh: hoặc đưa vào stdin bằng chuyển hướng của cmd,
-#    hoặc chỉ truyền đường dẫn {prompt_file} để worker tự đọc.
+# 2. Chọn args thường hoặc resume, rồi thay các biến trong args.
+$task = Get-TaskEntry $TaskId
+$resumed = $false
+$savedSession = [string](Get-Prop $task 'worker_session' '')
+$savedWorker = [string](Get-Prop $task 'worker_name' '')
+$resumeArgs = @(@(Get-Prop $wcfg 'resume_args' @()) | Where-Object { $null -ne $_ })
+if ($Resume) {
+    $resumeReason = ''
+    if ([string]::IsNullOrWhiteSpace($savedSession)) {
+        $resumeReason = 'chưa có phiên lưu'
+    } elseif ($savedWorker -ne $workerName) {
+        $resumeReason = "worker khác lần trước ($savedWorker)"
+    } elseif ($resumeArgs.Count -eq 0) {
+        $resumeReason = 'worker không có resume_args'
+    } else {
+        $resumed = $true
+        Write-Host "Tiếp tục phiên worker $savedSession."
+    }
+    if (-not $resumed) { Write-Host "Không resume được ($resumeReason), chạy phiên mới." }
+}
+
+# Prompt dài nên không nhét vào dòng lệnh: hoặc đưa vào stdin bằng chuyển hướng của cmd,
+# hoặc chỉ truyền đường dẫn {prompt_file} để worker tự đọc.
 $promptRel = "$taskRel/prompt.md"
-$workerArgs = @(@(Get-Prop $wcfg 'args' @()) | Where-Object { $null -ne $_ } |
-    ForEach-Object { ([string]$_).Replace('{prompt_file}', $promptRel).Replace('{task_id}', $TaskId) })
+$rawArgs = if ($resumed) { $resumeArgs } else { @(@(Get-Prop $wcfg 'args' @()) | Where-Object { $null -ne $_ }) }
+$workerArgs = @($rawArgs | ForEach-Object {
+    $argument = ([string]$_).Replace('{prompt_file}', $promptRel).Replace('{task_id}', $TaskId)
+    if ($resumed) { $argument = $argument.Replace('{session}', $savedSession) }
+    $argument
+})
 $cmdLine = Join-CommandLine $command $workerArgs
 if ([bool](Get-Prop $wcfg 'stdin_prompt' $false)) { $cmdLine += ' < "' + $promptPath + '"' }
 
@@ -86,7 +112,10 @@ Copy-Item -LiteralPath $promptPath -Destination (Join-Path $historyDir "$stamp-p
 Write-Host "Gọi worker '$workerName' cho $TaskId trên nhánh $branch (tối đa $timeout giây)..."
 $watchRoots = Get-GitWatchRoots
 $gitBefore = Get-GitDirSnapshot $watchRoots
+$workerWatch = [Diagnostics.Stopwatch]::StartNew()
 $r = Invoke-Cmd -CommandLine $cmdLine -TimeoutSec $timeout -EnvVars (Get-Prop $wcfg 'env')
+$workerWatch.Stop()
+$workerSeconds = [Math]::Round($workerWatch.Elapsed.TotalSeconds, 1)
 $gitAfter = Get-GitDirSnapshot $watchRoots
 $gitChanges = @(Compare-GitDirSnapshot $gitBefore $gitAfter)
 $gitUnsafe = @($gitChanges | Where-Object { $_.Kind -eq 'config' -or $_.Kind -eq 'info' }).Count -gt 0
@@ -105,6 +134,19 @@ if ($outputMode -eq 'agy-json') {
         $denied = @(@(Get-Prop $envelope 'denied_actions' @()) | Where-Object { $null -ne $_ })
     }
 }
+
+# Lưu session mới sau mỗi lần gọi, kể cả khi worker trả mã lỗi.
+$workerSession = ''
+if ($outputMode -eq 'agy-json') {
+    $workerSession = [string](Get-Prop $envelope 'conversation_id' '')
+} else {
+    $sessionMatches = [regex]::Matches(($r.StdOut + "`n" + $r.StdErr), '(?im)^\s*session id:\s*([0-9a-fA-F-]{36})\s*$')
+    if ($sessionMatches.Count -gt 0) { $workerSession = $sessionMatches[$sessionMatches.Count - 1].Groups[1].Value }
+}
+$stateAfterWorker = Get-TaskEntry $TaskId
+$stateStatus = [string](Get-Prop $stateAfterWorker 'status' '')
+Update-TaskState -TaskId $TaskId -Status $stateStatus -Fields @{ worker_name = $workerName; worker_session = $workerSession } | Out-Null
+
 if ($r.TimedOut) {
     $outcome = @{ Code = 124; Message = "Worker chạy quá $timeout giây, đã dừng cả cây tiến trình. Xem $taskRel/worker.log" }
 } elseif ($r.ExitCode -ne 0) {
@@ -186,18 +228,59 @@ Copy-Item -LiteralPath $outputPath -Destination (Join-Path $historyDir "$stamp-o
 
 # 5. Kiểm tra phạm vi. Không gọi git sau thay đổi config/info vì config có thể chạy lệnh.
 $changes = [pscustomobject]@{ Changed = @(); Violations = @() }
+$changesListed = $false
+$scopeError = $null
 if ($gitUnsafe) {
     Write-TextUtf8 (Join-Path $taskDir 'changed-files.txt') "(Không liệt kê: worker đã sửa .git/config hoặc .git/info — git diff có thể chạy lệnh do cấu hình chỉ định. Xem $taskRel/worker.log, mục GIT-DIR.)`n"
 } else {
     try {
         $changes = Save-TaskChanges $TaskId
+        $changesListed = $true
     } catch {
-        if ($gitChanges.Count -eq 0) { throw }
+        $scopeError = $_
     }
 }
 
 if ($gitChanges.Count -gt 0) { Show-GitDirChanges $gitChanges }
 if ($changes.Violations.Count -gt 0) { Show-Violations $changes.Violations }
+
+# Chọn mã cuối trước khi Fail để mọi lần gọi worker đều có đúng một dòng metrics.
+$finalExitCode = 0
+if ($scopeError -and $gitChanges.Count -eq 0) { $finalExitCode = 1 }
+elseif ($gitChanges.Count -gt 0 -or $changes.Violations.Count -gt 0) { $finalExitCode = 6 }
+elseif ($outcome) { $finalExitCode = [int]$outcome.Code }
+elseif (-not $markerOk) { $finalExitCode = 5 }
+elseif ($changesListed -and $changes.Changed.Count -eq 0) { $finalExitCode = 7 }
+
+$usage = Get-Prop $envelope 'usage' $null
+function ConvertTo-MetricNumber($Value) {
+    if ($null -eq $Value) { return $null }
+    $number = 0.0
+    if ([double]::TryParse([string]$Value, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { return $number }
+    return $null
+}
+$metrics = [ordered]@{
+    ts = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    task = $TaskId
+    worker = $workerName
+    resumed = [bool]$resumed
+    exit = [int]$finalExitCode
+    timed_out = [bool]$r.TimedOut
+    seconds = [double]$workerSeconds
+    status = [string](Get-Prop $envelope 'status' '')
+    total_tokens = ConvertTo-MetricNumber (Get-Prop $usage 'total_tokens' $null)
+    input_tokens = ConvertTo-MetricNumber (Get-Prop $usage 'input_tokens' $null)
+    output_tokens = ConvertTo-MetricNumber (Get-Prop $usage 'output_tokens' $null)
+    cached_tokens = ConvertTo-MetricNumber (Get-Prop $usage 'cache_read_tokens' $null)
+    changed_files = if ($changesListed) { [int]$changes.Changed.Count } else { $null }
+    session = $workerSession
+}
+$metricsLine = ConvertTo-Json -InputObject $metrics -Compress -Depth 5
+$metricsLine = ($metricsLine -split "`r?`n") -join ''
+$metricsPath = Join-Path $taskDir 'metrics.jsonl'
+[IO.File]::AppendAllText($metricsPath, $metricsLine + "`n", (New-Object System.Text.UTF8Encoding $false))
+
+if ($scopeError -and $gitChanges.Count -eq 0) { throw $scopeError }
 if ($gitChanges.Count -gt 0) {
     Fail 6 'Worker sửa thư mục .git (hook/cấu hình git). DỪNG, báo người dùng; không tự hoàn tác, KHÔNG chạy lệnh git nào (commit, checkout...) trước khi người dùng kiểm tra.'
 }

@@ -20,6 +20,8 @@ Cập nhật v3.6: worker `agy` mặc định thêm `--mode accept-edits` (khôn
 
 Cập nhật v3.7: `run-task.ps1` và `finish-task.ps1` gói các bước của một task (orchestrator gọi 2 lệnh thay vì ~8); `run-checks.ps1` không in lại dòng lệnh của từng bước.
 
+Cập nhật v3.8: vòng fix tiếp tục phiên worker cũ (`-Resume` + `resume_args`); mỗi lần gọi worker ghi một dòng `tasks/<ID>/metrics.jsonl`.
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -135,7 +137,7 @@ Gọi từ gốc project: `powershell -NoProfile -ExecutionPolicy Bypass -File s
 | `run-task.ps1 -TaskId <ID> [-Worker <tên>] [-Fix]` | Gói start-task → implementing/fixing → worker → checks → checked | 0 ok · mã nguyên văn của bước lỗi |
 | `finish-task.ps1 -TaskId <ID> -Message <mô tả>` | Gói reviewing → review → approved + commit | 0 ok · 1 còn CRITICAL/HIGH · 2 thiếu báo cáo · 3 hết lượt fix |
 | `start-task.ps1 -TaskId <ID>` | Tạo/chuyển nhánh `feature/<ID>`, ghi `base_commit` | 0 ok · 1 lỗi (chưa git, chưa commit, cây bẩn...) |
-| `run-worker.ps1 -TaskId <ID> [-Worker <tên>]` | Gọi worker với `tasks/<ID>/prompt.md` | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm/.git · 7 không đổi file nào · 8 bị từ chối, không trả lời · 9 không trả lời · 10 status khác SUCCESS · 11 không phải JSON · 124 quá giờ |
+| `run-worker.ps1 -TaskId <ID> [-Worker <tên>] [-Resume]` | Gọi worker với `tasks/<ID>/prompt.md`; `-Resume` dùng `resume_args` để tiếp tục phiên worker đã lưu trong state | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm/.git · 7 không đổi file nào · 8 bị từ chối, không trả lời · 9 không trả lời · 10 status khác SUCCESS · 11 không phải JSON · 124 quá giờ |
 | `run-checks.ps1 [-TaskId <ID>]` | Chạy `checks` theo thứ tự | 0 PASS · 1 FAIL/quá giờ · 2 chưa cấu hình |
 | `run-review.ps1 -TaskId <ID>` | Gộp 3 báo cáo, đếm mức độ | 0 đạt · 1 còn CRITICAL/HIGH · 2 thiếu báo cáo |
 | `collect-changes.ps1 -TaskId <ID>` | Tạo lại diff + kiểm tra phạm vi (sau khi sửa tay) | 0 ok · 6 sửa file cấm |
@@ -150,7 +152,8 @@ Khi có nhiều điều kiện cùng lúc, ưu tiên mã thoát là `6 > 124 > 3
 
 ```json
 { "title": "", "status": "planned", "phase_history": ["planned"], "fix_attempts": 0, "max_fix_attempts": 3,
-  "branch": "feature/AUTH-001", "base_commit": "<sha>", "last_review_summary": "reviews/...", "updated_at": "..." }
+  "branch": "feature/AUTH-001", "base_commit": "<sha>", "last_review_summary": "reviews/...", "worker_name": "agy",
+  "worker_session": "<session id>", "updated_at": "..." }
 ```
 
 Status hợp lệ: `designed` → `planned` → `implementing` → `checked` → `reviewing` → `fixing` → `approved` | `blocked`.
@@ -169,14 +172,19 @@ Quy tắc: đọc `state/` trước mỗi bước; chỉ ghi qua script; phiên 
   "agy": {
     "command": "agy",
     "args": ["--output-format", "json", "--effort", "high", "--print-timeout", "8m", "-p", "Read the file {prompt_file} in this workspace and carry out every instruction in it exactly. Your final reply must follow the response format defined in that file."],
+    "resume_args": ["--conversation", "{session}", "-p", "Read the file {prompt_file} in this workspace and carry out every instruction in it exactly. Your final reply must follow the response format defined in that file."],
     "output": "agy-json", "stdin_prompt": false, "timeout_sec": 540
   },
-  "codex":      { "command": "codex",  "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],         "output": "text", "stdin_prompt": true,  "timeout_sec": 540 },
+  "codex":      { "command": "codex",  "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],         "resume_args": ["exec", "--sandbox", "workspace-write", "--color", "never", "resume", "{session}", "-"], "output": "text", "stdin_prompt": true,  "timeout_sec": 540 },
   "gemini-cli": { "command": "gemini", "args": ["--approval-mode", "auto_edit", "--skip-trust", "-p", "Follow ..."],       "output": "text", "stdin_prompt": true,  "timeout_sec": 540 }
 }
 ```
 
 `workers.<tên>.output` nhận `"text"` (mặc định nếu thiếu, `null` hoặc rỗng) hoặc `"agy-json"`; so sánh không phân biệt hoa thường sau `Trim()`. Giá trị khác trả mã 1. Chế độ `text` tách marker từ stdout như trước. Chế độ `agy-json` tìm JSON envelope, lấy `response` để tách marker và ghi `conversation_id`, `status`, `usage`, `denied_actions` vào `worker.log`.
+
+`workers.<tên>.resume_args` là mảng tham số tùy chọn, dùng thay `args` khi chạy `run-worker.ps1 -Resume`; `{session}`, `{prompt_file}` và `{task_id}` được thay bằng session đã lưu, đường dẫn prompt và ID task. `run-worker.ps1` chỉ resume khi `worker_session` có giá trị, `worker_name` trong state trùng worker đang chọn và worker có `resume_args`; nếu thiếu điều kiện, script chạy phiên mới. Session của `agy-json` lấy từ `conversation_id` trong envelope; session của worker `text` như Codex lấy từ dòng `session id: <UUID>` trong stdout hoặc stderr. Sau mỗi lần gọi worker, `tasks/<ID>/metrics.jsonl` append một dòng với `ts`, `task`, `worker`, `resumed`, `exit`, `timed_out`, `seconds`, `status`, `total_tokens`, `input_tokens`, `output_tokens`, `cached_tokens`, `changed_files` và `session`.
+
+Thứ tự tham số theo từng CLI: `codex` chỉ nhận cờ TRƯỚC subcommand (`exec --sandbox ... resume <id> -`); đặt cờ sau `resume` sẽ bị từ chối với `Usage: codex exec resume <SESSION_ID> [PROMPT]`. `agy` dùng `--conversation <id>` ở bất kỳ vị trí nào trước `-p`.
 
 Phân loại `agy-json`: stdout rỗng → 9; không có envelope → 11; `status` khác `SUCCESS` → 10; response rỗng cùng `denied_actions` → 8; response rỗng không có hành động bị từ chối → 9. Envelope thành công có response thì xử lý marker bình thường; có hành động bị từ chối nhưng vẫn có response sẽ hiện cảnh báo và tiếp tục.
 
@@ -215,6 +223,7 @@ Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu
 - Mọi vòng fix — do checks FAIL hay review còn CRITICAL/HIGH — đều bắt đầu bằng `update-state.ps1 -Status fixing -IncrementFixAttempts`.
 - Vượt `max_fix_attempts` (mặc định 3): script tự chuyển `blocked`, trả exit 3. Orchestrator ghi `reviews/<ID>-summary.md`, dừng feature, báo người dùng.
 - Fix-prompt (mẫu `.claude/orchestrator/fix-prompt.md`) ghi đè `tasks/<ID>/prompt.md`; mọi prompt/output/log cũ được lưu trong `tasks/<ID>/history/`.
+- `run-task.ps1 -TaskId <ID> -Fix` tự tiếp tục phiên worker đã lưu; fix-prompt có thể dùng biến thể ngắn khi resume.
 
 ## 12. Memory & docs
 
