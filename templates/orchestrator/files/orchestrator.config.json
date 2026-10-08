@@ -1,0 +1,44 @@
+{
+  "worker": "agy",
+  "workers": {
+    "agy": {
+      "note": "Antigravity CLI. Đăng nhập: chạy `agy` một lần ở chế độ tương tác. Headless tự cho đọc/ghi file trong workspace, từ chối lệnh shell.",
+      "command": "agy",
+      "args": ["--print-timeout", "8m", "-p", "Read the file {prompt_file} in this workspace and carry out every instruction in it exactly. Your final reply must follow the response format defined in that file."],
+      "stdin_prompt": false,
+      "timeout_sec": 540,
+      "env": {}
+    },
+    "codex": {
+      "note": "OpenAI Codex CLI, đăng nhập bằng tài khoản ChatGPT (`codex login`). workspace-write: ghi được trong workspace, lệnh shell chạy trong sandbox.",
+      "command": "codex",
+      "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],
+      "stdin_prompt": true,
+      "timeout_sec": 540,
+      "env": {}
+    },
+    "gemini-cli": {
+      "note": "Gemini CLI. Cần xác thực được ở chế độ không tương tác (API key GEMINI_API_KEY nếu đăng nhập Google cá nhân bị từ chối).",
+      "command": "gemini",
+      "args": ["--approval-mode", "auto_edit", "--skip-trust", "-p", "Follow the instructions in the input above exactly."],
+      "stdin_prompt": true,
+      "timeout_sec": 540,
+      "env": {}
+    }
+  },
+  "checks": [],
+  "checks_example": [
+    { "name": "lint",  "command": "npm run lint",     "timeout_sec": 300 },
+    { "name": "build", "command": "npm run build",    "timeout_sec": 600 },
+    { "name": "test",  "command": "npm test -- --ci", "timeout_sec": 900 }
+  ],
+  "max_fix_attempts": 3,
+  "git": {
+    "branch_prefix": "feature/",
+    "protected_branches": ["main", "master", "develop"]
+  },
+  "scope": {
+    "always_protected": [".claude/", "scripts/", "memory/", "docs/", "orchestrator.config.json", "orchestrator-guide.md"],
+    "ignored": ["tasks/", "reviews/", "state/"]
+  }
+}

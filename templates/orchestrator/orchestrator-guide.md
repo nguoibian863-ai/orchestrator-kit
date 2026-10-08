@@ -1,0 +1,237 @@
+# Hướng dẫn Orchestrator: Claude Code điều phối worker AI (v3)
+
+> Worker mặc định: **Antigravity CLI** (`agy`). Có sẵn cấu hình cho **Codex CLI** (đăng nhập ChatGPT) và **Gemini CLI** — đổi bằng một chữ trong `orchestrator.config.json` (mục 8).
+
+> Tài liệu tổng quát, không khoá vào stack cụ thể. File trong project là nguồn sự thật — tài liệu này giải thích *vì sao* và *cách dùng*, không chép lại toàn bộ nội dung file.
+
+## 0. Thay đổi so với v2
+
+Cập nhật v3.1: worker trung tính (`run-gemini.ps1` → `run-worker.ps1`, `gemini.log` → `worker.log`, `gemini-prompt.md` → `worker-prompt.md`); cấu hình nhiều worker có tên, chọn bằng `"worker": "<tên>"` hoặc `-Worker <tên>`; mặc định chuyển sang Antigravity CLI vì Gemini CLI đăng nhập bằng tài khoản Google cá nhân bị từ chối (`IneligibleTierError`).
+
+| Vấn đề ở v2 | Cách v3 xử lý |
+|---|---|
+| `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
+| `run-checks.ps1` lint FAIL vẫn trả exit 0 | Dừng ở bước lỗi đầu tiên, trả exit 1; danh sách lệnh lấy từ `orchestrator.config.json` |
+| `run-gemini.ps1` không bắt mã lỗi của worker, khai báo timeout nhưng không dùng | Kiểm tra mã thoát, timeout thật (giết cả cây tiến trình), mã thoát riêng cho từng tình huống |
+| `$ErrorActionPreference=Stop` + `2>&1` làm chết script trên PowerShell 5.1 khi Gemini in cảnh báo | Gọi tiến trình qua `System.Diagnostics.Process`, chạy được trên cả PowerShell 5.1 và 7 |
+| State ghi có BOM (Node đọc lỗi), nhận status gõ sai, không khoá file | UTF-8 không BOM, `ValidateSet`, khoá độc quyền khi đọc-sửa-ghi |
+| "Do Not Modify" chỉ là lời dặn, `--yolo` cho Gemini toàn quyền | Worker chỉ được sửa file (agy headless / Gemini `auto_edit`) hoặc chạy shell trong sandbox (Codex `workspace-write`); sau mỗi lần chạy, script đối chiếu `git diff` với danh sách cấm |
+| Nói "mỗi task một branch" nhưng không có bước nào tạo branch | `start-task.ps1` tạo nhánh + ghi commit gốc; `run-worker.ps1` từ chối chạy nếu sai nhánh hoặc trên `main` |
+| Check FAIL quay lại sửa mà không tính lượt → có thể lặp vô hạn | Mọi vòng fix (do checks hay review) đều qua `-IncrementFixAttempts`; vượt giới hạn script tự chuyển `blocked`, trả exit 3 |
+| `/init-orchestrator` để Claude gõ lại ~15 KB file mẫu | `scaffold.ps1` chép file thật trong 1 giây, không ghi đè, chặn thư mục không trống |
+| Gemini trả lại toàn bộ code trong output → Claude đọc lại, tốn token | Worker sửa file trực tiếp, output chỉ là tóm tắt; reviewer đọc `changes.patch`; subagent ghi báo cáo ra file, chỉ trả 1 dòng số liệu |
+| `/review` có thể trùng lệnh có sẵn của Claude Code | Đổi thành `/review-task` |
+
+## 1. Mục tiêu & kiến trúc
+
+- **Claude Code** (phiên chính) là *orchestrator*: thiết kế, điều phối, gác cổng chất lượng — không viết code sản xuất.
+- **Worker AI** (mặc định Antigravity CLI `agy`; hoặc Codex CLI, Gemini CLI): sửa file trong repo theo prompt chặt phạm vi.
+- Mọi thay đổi phải qua **kiểm tra tự động** rồi **review** (3 subagent chạy song song); không duyệt khi còn CRITICAL/HIGH.
+- Trạng thái nằm trong `state/`, không phụ thuộc trí nhớ hội thoại. **Mã thoát của script là quyết định**, Claude không tự diễn giải log.
+
+```
+Người dùng ──► /orchestrator hoặc /feature
+                 │
+Claude (orchestrator) ── đọc/ghi state/ qua script
+   ├─ subagent retriever  → tasks/feature-<slug>/knowledge.md   (tuỳ chọn)
+   ├─ subagent architect  → tasks/feature-<slug>/design.md
+   ├─ subagent planner    → tasks/feature-<slug>/plan.md
+   │
+   └─ với từng task:
+        start-task.ps1    → nhánh feature/<ID>, ghi base_commit
+        run-worker.ps1    → worker sửa file → output.md, changed-files.txt, changes.patch, kiểm tra phạm vi
+        run-checks.ps1    → lint/build/test từ config, dừng ở lỗi đầu tiên
+        reviewer ║ security ║ qa  (song song) → tasks/<ID>/*-output.md
+        run-review.ps1    → đếm CRITICAL/HIGH → ĐẠT (commit) | CHƯA ĐẠT (fix, tối đa N vòng → blocked)
+```
+
+## 2. Yêu cầu môi trường
+
+- Windows, **Windows PowerShell 5.1 hoặc PowerShell 7** (script chạy được trên cả hai; lệnh gọi dùng `powershell`, có sẵn trên mọi máy Windows).
+- **Claude Code**, không cần plugin.
+- **Ít nhất một worker** đã đăng nhập và chạy được ở chế độ không tương tác:
+
+  | Worker | Kiểm tra cài đặt | Đăng nhập | Thử nhanh |
+  |---|---|---|---|
+  | `agy` (Antigravity CLI) | `agy --version` (đã thử 1.3.1) | chạy `agy` một lần ở chế độ tương tác | `agy -p "Reply with exactly: PONG"` |
+  | `codex` (Codex CLI) | `codex --version` (đã thử 0.160.0) | `codex login` bằng tài khoản ChatGPT | `echo "Reply with exactly: PONG" \| codex exec -` |
+  | `gemini-cli` | `gemini --version` | API key `GEMINI_API_KEY` (đăng nhập Google cá nhân có thể bị từ chối: `IneligibleTierError`) | `echo hi \| gemini -p "reply OK"` |
+- **git**, và project phải là git repo có ít nhất một commit trước task đầu tiên.
+- Trình quản lý gói, linter, test runner của dự án — để điền vào `checks`.
+
+## 3. Cài đặt & chia sẻ
+
+Hai thứ cần có trong thư mục người dùng (`~` = `C:\Users\<tên>`):
+
+```
+~/.claude/commands/init-orchestrator.md     # lệnh /init-orchestrator
+~/.claude/templates/orchestrator/           # toàn bộ thư mục này
+    scaffold.ps1
+    orchestrator-guide.md
+    files/                                  # cây file được chép vào project
+```
+
+Chia sẻ cho người khác: gửi đúng hai thứ trên, giữ nguyên đường dẫn. Bộ mẫu không chứa key hay đường dẫn riêng của máy.
+
+Tạo project mới: mở Claude Code trong thư mục trống, gõ `/init-orchestrator nextjs mongodb` (hoặc không tham số để được hỏi).
+
+## 4. Cấu trúc project sau khi scaffold
+
+```
+<project>/
+├── .claude/
+│   ├── agents/          retriever, architect, planner, reviewer, security, qa (.md, có frontmatter)
+│   ├── commands/        orchestrator, feature, review-task, fix (.md)
+│   ├── skills/          project-code-review, project-security-audit, [<tech>-architecture], [<db>-patterns]
+│   ├── orchestrator/    worker-prompt.md, fix-prompt.md (mẫu prompt cho worker)
+│   └── settings.json
+├── scripts/             _lib.ps1 + 7 script (mục 6)
+├── state/               task-state.json, workflow-state.json
+├── memory/              summary, architecture, roadmap, decisions, tech-stack, known-issues
+├── docs/                business-rules, api-contracts, architecture-rules
+├── tasks/               feature-<slug>/ (knowledge, design, plan) và <ID>/ (prompt, output, log, diff, báo cáo, history/)
+├── reviews/             báo cáo tổng hợp từng vòng, <ID>-summary.md khi blocked
+├── src/
+├── .gitignore           state/, tasks/, reviews/
+├── orchestrator.config.json
+└── orchestrator-guide.md
+```
+
+## 5. Agents
+
+Mỗi agent = **Role** (file trong `.claude/agents/`) + **State** (`state/`) + **Knowledge** (chỉ được đọc những file ghi trong agent). Agent ghi kết quả ra file và chỉ trả về tóm tắt ngắn, để context của phiên chính không phình.
+
+| Agent | Khi nào | Ghi ra | Trả về |
+|---|---|---|---|
+| retriever | Feature có tài liệu/API ngoài | `tasks/feature-<slug>/knowledge.md` | ≤5 dòng + điểm chưa rõ |
+| architect | Mọi feature | `tasks/feature-<slug>/design.md` | ≤10 dòng + điểm chưa rõ + có đổi kiến trúc không |
+| planner | Sau design | `tasks/feature-<slug>/plan.md` | Danh sách `ID \| tiêu đề \| phụ thuộc` |
+| reviewer | Sau checks PASS | `tasks/<ID>/reviewer-output.md` | `CRITICAL=n HIGH=n MEDIUM=n LOW=n` |
+| security | Sau checks PASS | `tasks/<ID>/security-output.md` | như trên |
+| qa | Sau checks PASS | `tasks/<ID>/qa-output.md` | như trên |
+
+Agent review chỉ có quyền `Read, Grep, Glob, Write` (không chạy shell). Muốn giảm chi phí, có thể thêm `model: sonnet` (hoặc `haiku`) vào frontmatter của từng agent.
+
+## 6. Scripts & mã thoát
+
+Gọi từ gốc project: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/<tên>.ps1 <tham số>`.
+
+| Script | Việc | Mã thoát |
+|---|---|---|
+| `update-workflow.ps1 -Feature <tên> -Phase <phase> [-Force]` | Bắt đầu feature / đổi phase | 0 ok · 3 đang có feature dang dở |
+| `update-state.ps1 -TaskId <ID> -Status <s> [-IncrementFixAttempts] [-Title <t>]` | Đổi status task | 0 ok · 3 hết lượt fix → `blocked` |
+| `start-task.ps1 -TaskId <ID>` | Tạo/chuyển nhánh `feature/<ID>`, ghi `base_commit` | 0 ok · 1 lỗi (chưa git, chưa commit, cây bẩn...) |
+| `run-worker.ps1 -TaskId <ID> [-Worker <tên>]` | Gọi worker với `tasks/<ID>/prompt.md` | 0 ok · 1 thiết lập · 3 worker lỗi · 5 thiếu marker · 6 sửa file cấm · 7 không đổi file nào · 124 quá giờ |
+| `run-checks.ps1 [-TaskId <ID>]` | Chạy `checks` theo thứ tự | 0 PASS · 1 FAIL/quá giờ · 2 chưa cấu hình |
+| `run-review.ps1 -TaskId <ID>` | Gộp 3 báo cáo, đếm mức độ | 0 đạt · 1 còn CRITICAL/HIGH · 2 thiếu báo cáo |
+| `collect-changes.ps1 -TaskId <ID>` | Tạo lại diff + kiểm tra phạm vi (sau khi sửa tay) | 0 ok · 6 sửa file cấm |
+
+`run-worker.ps1` có thể chạy tới `worker.timeout_sec` giây (mặc định 540, vừa trong giới hạn 600 giây của một lệnh shell trong Claude Code). Tăng quá 540 thì phải chạy script ở chế độ nền.
+
+## 7. State
+
+`state/task-state.json` — mỗi task:
+
+```json
+{ "title": "", "status": "planned", "phase_history": ["planned"], "fix_attempts": 0, "max_fix_attempts": 3,
+  "branch": "feature/AUTH-001", "base_commit": "<sha>", "last_review_summary": "reviews/...", "updated_at": "..." }
+```
+
+Status hợp lệ: `designed` → `planned` → `implementing` → `checked` → `reviewing` → `fixing` → `approved` | `blocked`.
+
+`state/workflow-state.json` — feature hiện tại, `current_phase` (`retrieving`, `designing`, `planning`, `implementing`, `review-loop`, `done`, `blocked`), danh sách task, task bị chặn, thời điểm bắt đầu. Danh sách task và task bị chặn được `update-state.ps1` tự đồng bộ.
+
+Quy tắc: đọc `state/` trước mỗi bước; chỉ ghi qua script; phiên mới (`/orchestrator`) luôn bắt đầu bằng việc đọc state để tiếp tục việc dang dở.
+
+## 8. Worker & phạm vi sửa
+
+`orchestrator.config.json` chứa danh sách worker có tên; `"worker"` chọn worker mặc định:
+
+```json
+"worker": "agy",
+"workers": {
+  "agy":        { "command": "agy",    "args": ["--print-timeout", "8m", "-p", "Read the file {prompt_file} ... exactly. ..."], "stdin_prompt": false, "timeout_sec": 540 },
+  "codex":      { "command": "codex",  "args": ["exec", "--sandbox", "workspace-write", "--color", "never", "-"],         "stdin_prompt": true,  "timeout_sec": 540 },
+  "gemini-cli": { "command": "gemini", "args": ["--approval-mode", "auto_edit", "--skip-trust", "-p", "Follow ..."],       "stdin_prompt": true,  "timeout_sec": 540 }
+}
+```
+
+- Đổi worker cho cả dự án: sửa `"worker"`. Đổi cho một lần chạy: `run-worker.ps1 -TaskId <ID> -Worker codex`.
+- Prompt dài nên không bao giờ nằm trên dòng lệnh. `stdin_prompt: true` → nội dung `prompt.md` được đưa vào stdin (Codex, Gemini). `stdin_prompt: false` → chỉ truyền đường dẫn qua `{prompt_file}` để worker tự đọc file (agy chỉ nhận prompt qua tham số). Trong `args`, `{prompt_file}` → `tasks/<ID>/prompt.md`, `{task_id}` → `<ID>`. Tham số không được chứa ký tự xuống dòng.
+- Quyền của từng worker:
+  - `agy` headless: tự cho đọc/ghi file trong workspace, từ chối lệnh shell (không có chế độ hỏi). `--print-timeout 8m` để agy tự dừng trước giới hạn 540 giây của script.
+  - `codex` `workspace-write`: ghi được trong workspace, lệnh shell chạy trong sandbox. Không dùng `--dangerously-bypass-approvals-and-sandbox`.
+  - `gemini-cli` `auto_edit`: chỉ sửa file, không chạy shell. Không dùng `yolo`.
+- `env` nhận giá trị dạng `"${env:TEN_BIEN}"` để lấy từ biến môi trường — không ghi key vào file.
+- Thêm worker khác: thêm một mục vào `workers`. Worker phải tự sửa file trong repo và in kết quả giữa `## OUTPUT_START` … `## OUTPUT_END`. Worker chỉ trả text (ví dụ gọi HTTP qua 9Router) cần thêm bước tách file từ output — chưa có trong bộ mẫu này.
+
+Kiểm tra phạm vi (tự động sau mỗi lần chạy worker): mọi file thay đổi so với `base_commit` (kể cả file mới chưa track) được so với `scope.always_protected` + `tasks/<ID>/do-not-modify.txt`. Glob: `*` không qua `/`, `**` qua mọi cấp, `thu-muc/` = mọi thứ bên trong. `tasks/`, `reviews/`, `state/` không tính (do script ghi).
+
+## 9. Kiểm tra tự động
+
+```json
+"checks": [
+  { "name": "lint",  "command": "npm run lint",     "timeout_sec": 300 },
+  { "name": "test",  "command": "npm test -- --ci", "timeout_sec": 900 }
+]
+```
+
+Mặc định `checks` trống — `run-checks.ps1` trả exit 2 để orchestrator hỏi người dùng thay vì cho qua. Lệnh chạy qua `cmd.exe` tại gốc project; log đầy đủ ở `tasks/<ID>/checks.log`.
+
+## 10. Review & thang mức độ
+
+Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu, crash, sai nghiệp vụ cốt lõi) · **HIGH** (nghiêm trọng, chưa sập ngay) · **MEDIUM** (vi phạm best practice) · **LOW** (nhỏ, style).
+
+Định dạng báo cáo cố định để script đếm: heading `## CRITICAL` / `## HIGH` / `## MEDIUM` / `## LOW`; mỗi phát hiện là một dòng bắt đầu bằng `- ` ở đầu dòng; chi tiết thụt vào bên dưới; mục trống để trống. `run-review.ps1` ghi báo cáo tổng hợp `reviews/<ID>-round<N>-<thời điểm>.md` với bảng số liệu ở đầu.
+
+## 11. Vòng fix
+
+- Mọi vòng fix — do checks FAIL hay review còn CRITICAL/HIGH — đều bắt đầu bằng `update-state.ps1 -Status fixing -IncrementFixAttempts`.
+- Vượt `max_fix_attempts` (mặc định 3): script tự chuyển `blocked`, trả exit 3. Orchestrator ghi `reviews/<ID>-summary.md`, dừng feature, báo người dùng.
+- Fix-prompt (mẫu `.claude/orchestrator/fix-prompt.md`) ghi đè `tasks/<ID>/prompt.md`; mọi prompt/output/log cũ được lưu trong `tasks/<ID>/history/`.
+
+## 12. Memory & docs
+
+- `memory/summary.md` — bản nén 40–60 dòng, đọc **đầu tiên**; chỉ mở file chi tiết khi cần. Cập nhật bằng cách ghi đè phần liên quan sau mỗi feature.
+- `memory/decisions.md` — mỗi quyết định thật một mục (Ngày / Quyết định / Lý do / Trạng thái), không xoá lịch sử.
+- `architecture.md`, `roadmap.md`, `tech-stack.md`, `known-issues.md` — phản ánh hiện trạng thật.
+- `docs/` — tri thức tĩnh (business rules, API contract, architecture rules); retriever tóm tắt phần liên quan cho từng feature.
+- Khi khởi tạo, mọi file để placeholder "Chưa có" — không để ví dụ minh hoạ, tránh Claude đọc nhầm thành ngữ cảnh thật.
+
+## 13. Git
+
+- `state/`, `tasks/`, `reviews/` nằm trong `.gitignore` (scaffold tự thêm): đây là dữ liệu lúc chạy, nếu để git theo dõi thì mỗi lần đổi/reset nhánh sẽ kéo state theo.
+- Mỗi task một nhánh `feature/<ID>`, tách từ nhánh hiện tại; task sau tách từ nhánh task trước, nên nhánh cuối cùng chứa toàn bộ feature.
+- Worker không chạy trên `main`/`master`/`develop` (cấu hình ở `git.protected_branches`).
+- Task đạt → commit trên nhánh task: `[worker] <ID>: <mô tả>`. Không tự merge; PR/merge chỉ khi người dùng yêu cầu.
+- Task `blocked` → giữ nguyên nhánh, không merge.
+
+## 14. Commands & cách dùng hằng ngày
+
+| Lệnh | Việc |
+|---|---|
+| `/orchestrator [yêu cầu]` | Xem trạng thái, tiếp tục việc dang dở, hoặc chuyển sang quy trình feature |
+| `/feature <mô tả>` | Toàn bộ quy trình: thiết kế → chia task → worker → checks → review → fix → commit |
+| `/review-task <ID>` | Chạy lại vòng review cho một task (ví dụ sau khi sửa tay) |
+| `/fix <ID>` | Chạy một vòng fix theo báo cáo gần nhất |
+
+Trước task đầu tiên: điền `checks`, `git init` + commit khung (Claude chỉ làm khi bạn yêu cầu).
+
+## 15. Giới hạn đã biết
+
+- Script chỉ hỗ trợ Windows (dùng `cmd.exe`, `taskkill`).
+- `agy -p` từng có lỗi treo khi chạy với output chuyển hướng trên Windows (issue #318 của antigravity-cli, bản 1.0.6). Bản 1.3.1 đã chạy được qua script; nếu bản khác bị treo, script vẫn dừng ở `timeout_sec` và trả mã 124.
+- Kiểm tra phạm vi dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác.
+- Thay đổi trong `tasks/`, `reviews/`, `state/` không được kiểm tra phạm vi.
+- Script đếm phát hiện dựa trên định dạng báo cáo; agent viết sai định dạng sẽ bị đếm sai — Claude vẫn phải đọc báo cáo tổng hợp khi kết quả đáng ngờ.
+
+## 16. Quy tắc quan trọng nhất
+
+1. Claude không viết code sản xuất — Claude thiết kế, điều phối, review.
+2. Mã thoát của script là quyết định; không tự diễn giải log để cho qua.
+3. Đọc `state/` trước mỗi bước, ghi `state/` chỉ qua script.
+4. Worker chỉ chạy trên nhánh task, với prompt có `Do Not Modify` và `Out Of Scope`; vi phạm phạm vi → dừng, báo người dùng.
+5. Không bỏ qua kiểm tra tự động hay review. Không approve khi còn CRITICAL/HIGH.
+6. Vòng fix có giới hạn, theo dõi qua state; hết lượt → `blocked`, báo người dùng.
+7. Quyết định kỹ thuật thật ghi vào `memory/decisions.md`; đổi kiến trúc thì cập nhật `architecture.md` và `summary.md`.
+8. Không merge vào nhánh chính khi chưa có xác nhận của người dùng.
