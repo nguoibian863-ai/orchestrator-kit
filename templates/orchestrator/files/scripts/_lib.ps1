@@ -348,6 +348,12 @@ function Get-GitDirSnapshot([object[]]$Roots) {
             if (Test-Path -LiteralPath $root.Path -PathType Container) {
                 if (Test-Prop $root 'NameFilter') {
                     $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -Filter ([string]$root.NameFilter) -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -notmatch '[\\/]\.git([\\/]|$)' })
+                    $scope = Get-Prop (Get-Config) 'scope'
+                    $ignored = @(Get-Prop $scope 'ignored' @('tasks/', 'reviews/', 'state/'))
+                    $files = @($files | Where-Object {
+                        $displayPath = ConvertTo-GitWatchDisplayPath $_.FullName
+                        -not (Test-PathMatch $displayPath $ignored)
+                    })
                 } else {
                     $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -ErrorAction SilentlyContinue)
                 }
