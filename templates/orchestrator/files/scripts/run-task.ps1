@@ -25,6 +25,7 @@ function Invoke-TaskStep {
         $result = Invoke-Cmd -CommandLine $commandLine -TimeoutSec $TimeoutSec
     } catch {
         @(Get-Lines $_.Exception.Message) | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" }
+        Write-Host "  (ngoại lệ: $($_.Exception.GetType().FullName): $($_.Exception.Message))"
         Write-Host "DỪNG: $Name trả mã 1."
         if ($LogHint) { Write-Host "Xem $LogHint" }
         exit 1

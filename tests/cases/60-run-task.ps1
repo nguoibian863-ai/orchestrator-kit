@@ -102,10 +102,19 @@ Add-Case -Name '60: run-task khong tu cat worker truoc timeout_sec' -Body {
     Set-Scenario -Project $project -Scenario @{ actions = @(@{ op = 'sleep'; seconds = 60 }); exit_code = 0 }
     Set-ProjectChecks -Project $project -Checks @(@{ name = 'ok'; command = 'cmd /c exit 0'; timeout_sec = 60 })
     $scriptPath = Join-Path $project 'scripts/run-task.ps1'
-    $processArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-TaskId', 'T1')
+    $outputPath = Join-Path $project 'tasks/T1/run-task-output.txt'
+    $wrapperPath = Join-Path $project 'tasks/T1/run-task-wrapper.cmd'
+    $commandLine = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}" -TaskId T1 > "{2}" 2>&1' -f $script:PowerShellExe, $scriptPath, $outputPath
+    $wrapperLines = @(
+        '@echo off',
+        $commandLine,
+        'set "runTaskExitCode=%errorlevel%"',
+        'exit /b %runTaskExitCode%'
+    )
+    [IO.File]::WriteAllLines($wrapperPath, $wrapperLines, [Text.Encoding]::ASCII)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $script:PowerShellExe
-    $psi.Arguments = (($processArguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' ')
+    $psi.FileName = $env:ComSpec
+    $psi.Arguments = '/d /c "' + $wrapperPath + '"'
     $psi.WorkingDirectory = $project
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -113,7 +122,21 @@ Add-Case -Name '60: run-task khong tu cat worker truoc timeout_sec' -Body {
     $process = [Diagnostics.Process]::Start($psi)
     $process.WaitForExit()
     $watch.Stop()
-    Assert-Equal -Expected 124 -Actual $process.ExitCode -Message 'run-worker timeout code is preserved'
+    $result = [pscustomobject]@{ ExitCode = $process.ExitCode; Output = '' }
+    for ($attempt = 0; $attempt -lt 150; $attempt++) {
+        try {
+            $result.Output = Read-ProjectFile -Project $project -Path 'tasks/T1/run-task-output.txt'
+            break
+        } catch {
+            if ($attempt -ge 149) { throw }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    $script:LastProductOutput = $result.Output
+    $state = Read-ProjectFile -Project $project -Path 'state/task-state.json' | ConvertFrom-Json
+    $taskState = $state.tasks.T1
+    $diagnostic = "run-worker timeout code is preserved; state: status=$($taskState.status), branch=$($taskState.branch), fix_attempts=$($taskState.fix_attempts); run-task output: $($result.Output)"
+    Assert-Equal -Expected 124 -Actual $result.ExitCode -Message $diagnostic
     $workerLog = Read-ProjectFile -Project $project -Path 'tasks/T1/worker.log'
     Assert-Match -Pattern 'timeout=True' -Text $workerLog -Message 'worker handled its configured timeout'
     if ($watch.Elapsed.TotalSeconds -ge 60) { throw 'run-task did not return before the worker sleep finished' }

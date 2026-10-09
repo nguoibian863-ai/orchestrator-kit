@@ -149,8 +149,31 @@ function Read-ProjectFile {
 
 function Assert-Equal {
     param([object]$Expected, [object]$Actual, [string]$Message)
-    if (-not [object]::Equals($Expected, $Actual)) {
-        throw "assert equal failed: $Message | expected $Expected, got $Actual"
+    $equal = $false
+    if ($null -eq $Expected -and $null -eq $Actual) {
+        $equal = $true
+    } elseif ($null -ne $Expected -and $null -ne $Actual) {
+        $expectedNumber = [decimal]0
+        $actualNumber = [decimal]0
+        $numberStyles = [Globalization.NumberStyles]::Float
+        $culture = [Globalization.CultureInfo]::InvariantCulture
+        $expectedIsNumber = [decimal]::TryParse([string]$Expected, $numberStyles, $culture, [ref]$expectedNumber)
+        $actualIsNumber = [decimal]::TryParse([string]$Actual, $numberStyles, $culture, [ref]$actualNumber)
+        if ($expectedIsNumber -and $actualIsNumber) {
+            $equal = ($expectedNumber -eq $actualNumber)
+        } elseif ($Expected -is [bool] -and $Actual -is [bool]) {
+            $equal = ($Expected -eq $Actual)
+        } else {
+            $equal = [object]::Equals($Expected, $Actual)
+        }
+    }
+
+    if (-not $equal) {
+        $expectedType = if ($null -eq $Expected) { '<null>' } else { $Expected.GetType().FullName }
+        $actualType = if ($null -eq $Actual) { '<null>' } else { $Actual.GetType().FullName }
+        $expectedDisplay = if ($null -eq $Expected) { '<null>' } else { [string]$Expected }
+        $actualDisplay = if ($null -eq $Actual) { '<null>' } else { [string]$Actual }
+        throw "assert equal failed: $Message | expected $expectedDisplay ($expectedType), got $actualDisplay ($actualType)"
     }
 }
 
@@ -275,10 +298,12 @@ function Remove-SmokeRoot {
 }
 
 function Write-FailureTail {
-    param([string]$Output)
-    $lines = @($Output -split "`r?`n")
+    param([string]$Output, [int]$MaxLines = 15)
+    $lines = @($Output -split "[\r\n]+")
     $lines = @($lines | Where-Object { $_ -ne '' })
-    if ($lines.Count -gt 15) { $lines = @($lines | Select-Object -Last 15) }
+    if ($env:SMOKE_FULL_OUTPUT -ne '1' -and $lines.Count -gt $MaxLines) {
+        $lines = @($lines | Select-Object -Last $MaxLines)
+    }
     foreach ($line in $lines) { Write-Host "      $line" }
 }
 
