@@ -1,0 +1,11 @@
+name: DiagA
+on:
+  push:
+    branches: [main]
+jobs:
+  a:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        run: .github/scripts/check-scripts.ps1

@@ -1,0 +1,15 @@
+name: DiagB
+on:
+  push:
+    branches: [main]
+jobs:
+  b:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - shell: ${{ matrix.shell }}
+        run: $PSVersionTable.PSVersion.ToString()
