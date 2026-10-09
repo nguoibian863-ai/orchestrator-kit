@@ -12,17 +12,12 @@ permissions:
 
 jobs:
   smoke:
-    name: smoke (${{ matrix.name }})
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Windows PowerShell 5.1
-            shell: powershell
-          - name: PowerShell 7
-            shell: pwsh
+        shell: [powershell, pwsh]
 
     steps:
       - uses: actions/checkout@v4
@@ -39,8 +34,6 @@ jobs:
 
       - name: Smoke test
         shell: ${{ matrix.shell }}
-        env:
-          GIT_CONFIG_NOSYSTEM: "1"
         run: |
           git config --global user.name ci
           git config --global user.email ci@example.invalid
