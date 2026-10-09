@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.name }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows PowerShell 5.1
+            shell: powershell
+          - name: PowerShell 7
+            shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Phien ban PowerShell va git
+        shell: ${{ matrix.shell }}
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          git --version
+
+      - name: Kiem tra cu phap va BOM cua file .ps1
+        shell: ${{ matrix.shell }}
+        run: .github/scripts/check-scripts.ps1
+
+      - name: Smoke test
+        shell: ${{ matrix.shell }}
+        env:
+          GIT_CONFIG_NOSYSTEM: "1"
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+          git config --global init.defaultBranch main
+          git config --global commit.gpgsign false
+          tests/smoke.ps1
