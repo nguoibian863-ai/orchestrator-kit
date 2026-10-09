@@ -13,7 +13,7 @@ $script:StartedAt = [DateTime]::UtcNow
 $script:PowerShellExe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 foreach ($name in @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE')) {
-    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    if (Test-Path -LiteralPath "Env:\$name") { Remove-Item -LiteralPath "Env:\$name" -Force }
 }
 
 function Add-Case {
