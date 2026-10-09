@@ -32,6 +32,7 @@ Thay đổi cần làm: $ARGUMENTS
    - `0` → xong.
    - `1` còn CRITICAL/HIGH → vòng fix: ghi fix-prompt rồi `scripts/run-task.ps1 -TaskId <ID> -Fix`. Mã `3` = hết lượt → `scripts/update-workflow.ps1 -Phase blocked`, ghi `reviews/<ID>-summary.md`, DỪNG, báo người dùng.
    - `2` thiếu báo cáo → ghi lại báo cáo còn thiếu.
+   - Nếu xác định một phát hiện là báo nhầm hoặc rủi ro chấp nhận được: HỎI NGƯỜI DÙNG trước, nêu rõ phát hiện và lý do. Chỉ khi người dùng đồng ý thì ghi `tasks/<ID>/waivers.md` (một dòng `- [MỨC] <chuỗi con của dòng phát hiện> — Lý do: <lý do>`) và một mục trong `memory/decisions.md`, rồi chạy lại `finish-task.ps1`. Không bao giờ tự miễn trừ.
 9. `scripts/update-workflow.ps1 -Phase done`. Cập nhật `memory/` chỉ khi thay đổi đáng ghi nhớ. Không merge; merge/PR chỉ khi người dùng yêu cầu.
 
 ## Không bao giờ

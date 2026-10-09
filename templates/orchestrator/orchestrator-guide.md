@@ -26,6 +26,8 @@ Cập nhật v3.9: khoá `mode` (`lean` mặc định | `full`) — lean thì or
 
 Cập nhật v3.10: kiểm tra phạm vi theo dõi thêm `.gitignore`, `HEAD`/ref nhánh và các file trong `scope.watched_external` (cấu hình quyền của worker).
 
+Cập nhật v3.11: có thể miễn trừ phát hiện CRITICAL/HIGH qua `tasks/<ID>/waivers.md` (có lý do, hiện ở mục riêng của báo cáo).
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -227,6 +229,8 @@ Chế độ `lean`: một báo cáo `tasks/<ID>/review-output.md`, nguồn hiể
 Ba agent dùng chung thang: **CRITICAL** (khai thác được, mất dữ liệu, crash, sai nghiệp vụ cốt lõi) · **HIGH** (nghiêm trọng, chưa sập ngay) · **MEDIUM** (vi phạm best practice) · **LOW** (nhỏ, style).
 
 Định dạng báo cáo cố định để script đếm: heading `## CRITICAL` / `## HIGH` / `## MEDIUM` / `## LOW`; mỗi phát hiện là một dòng bắt đầu bằng `- ` ở đầu dòng với nhãn `[conf:HIGH]`, `[conf:MEDIUM]` hoặc `[conf:LOW]` ngay sau `- `; chi tiết thụt vào bên dưới; mục trống để trống. CRITICAL/HIGH có nhãn HIGH/MEDIUM hoặc thiếu nhãn tính chặn; CRITICAL/HIGH có nhãn LOW không tính chặn và xuất hiện ở mục riêng. MEDIUM/LOW vẫn được đếm theo mức. Báo cáo cũ không có nhãn tiếp tục tính CRITICAL/HIGH là chặn. `run-review.ps1` ghi báo cáo tổng hợp `reviews/<ID>-round<N>-<thời điểm>.md` với bảng số liệu ở đầu, gồm cột `CRIT/HIGH conf:LOW`.
+
+Waiver đặt trong `tasks/<ID>/waivers.md`, mỗi dòng theo khuôn `- [CRITICAL|HIGH] <chuỗi con của dòng phát hiện> — Lý do: <lý do>` (cũng nhận dấu đầu dòng `*`, `+`, số thứ tự, dấu `-` phân cách và `Ly do:`). Script chỉ miễn trừ CRITICAL/HIGH cùng mức khi chuỗi con dài ít nhất 10 ký tự xuất hiện trong nội dung phát hiện sau khi bỏ nhãn `[conf:...]`, không phân biệt hoa thường. Waiver sai khuôn, khác mức, quá ngắn hoặc thiếu lý do bị bỏ qua và cảnh báo; waiver hợp lệ không khớp cũng được cảnh báo. Phát hiện được miễn trừ không tính vào CRITICAL/HIGH chặn, được đếm ở cột `Miễn trừ` và vẫn hiện trong mục `Phát hiện được miễn trừ (không tính chặn)` của báo cáo tổng hợp. CRITICAL/HIGH `conf:LOW` vẫn được xử lý riêng như trước. Chỉ orchestrator ghi waiver sau khi hỏi người dùng; lý do phải vào memory/decisions.md.
 
 ## 11. Vòng fix
 

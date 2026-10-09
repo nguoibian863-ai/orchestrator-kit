@@ -60,6 +60,7 @@ Chế độ lean: orchestrator tự đọc `tasks/<ID>/changes.patch` + `output.
 **d. Tổng hợp và duyệt** — `scripts/finish-task.ps1 -TaskId <ID> -Message "<mô tả ngắn>"`. Script tự cập nhật reviewing, tổng hợp review, rồi chỉ khi đạt mới cập nhật approved và commit `[worker] <ID>: <mô tả ngắn>`. Nếu in `Chú ý: ... conf:LOW`, ghi vào Nợ kỹ thuật, không tự chặn. Không merge. Task kế tiếp sẽ tách nhánh từ nhánh này.
 
 **e. Fix** — mã 1 của `finish-task` (còn CRITICAL/HIGH) hoặc mã 1 của `run-task` tại `run-checks`:
+- Nếu xác định một phát hiện là báo nhầm hoặc rủi ro chấp nhận được: HỎI NGƯỜI DÙNG trước, nêu rõ phát hiện và lý do. Chỉ khi người dùng đồng ý thì ghi `tasks/<ID>/waivers.md` (một dòng `- [MỨC] <chuỗi con của dòng phát hiện> — Lý do: <lý do>`) và một mục trong `memory/decisions.md`, rồi chạy lại `finish-task.ps1`. Không bao giờ tự miễn trừ.
 - Ghi đè `tasks/<ID>/prompt.md` bằng fix-prompt theo `.claude/orchestrator/fix-prompt.md` (bản cũ đã được lưu trong `tasks/<ID>/history/`), rồi chạy `scripts/run-task.ps1 -TaskId <ID> -Fix`.
 - `run-task.ps1 -TaskId <ID> -Fix` tự tiếp tục phiên worker đã lưu; có thể dùng biến thể fix-prompt ngắn khi resume.
 - Mã 0 → quay lại bước c. Nếu script dừng ở `run-checks` với mã 1 thì lặp lại bước e sau khi cập nhật fix-prompt.
