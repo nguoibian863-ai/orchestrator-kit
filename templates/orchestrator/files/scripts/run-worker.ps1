@@ -67,7 +67,13 @@ $task = Get-TaskEntry $TaskId
 $base = [string](Get-Prop $task 'base_commit' '')
 $branch = [string](Get-Prop $task 'branch' '')
 if (-not $base -or -not $branch) { Fail 1 "Task chưa có nhánh. Chạy scripts/start-task.ps1 -TaskId $TaskId trước." }
-$current = (Invoke-Git 'rev-parse --abbrev-ref HEAD').StdOut.Trim()
+$currentResult = Invoke-Git 'rev-parse --abbrev-ref HEAD'
+$current = ([string]$currentResult.StdOut).Trim()
+if ($currentResult.ExitCode -ne 0 -or -not $current) {
+    $gitErr = (([string]$currentResult.StdErr) -replace '[\r\n]+', ' ').Trim()
+    if (-not $gitErr) { $gitErr = '(git không in lỗi)' }
+    Fail 1 "Không xác định được nhánh hiện tại: git rev-parse --abbrev-ref HEAD trả mã $($currentResult.ExitCode), thư mục làm việc '$((Get-Location).Path)', lỗi git: $gitErr"
+}
 if ($protectedBranches -contains $current) { Fail 1 "Không chạy worker trên nhánh được bảo vệ '$current'." }
 if ($current -ne $branch) { Fail 1 "Đang ở nhánh '$current' nhưng task $TaskId thuộc nhánh '$branch'. Chạy lại start-task." }
 
