@@ -45,6 +45,7 @@
   },
   "scope": {
     "always_protected": [".claude/", "scripts/", "memory/", "docs/", "orchestrator.config.json", "orchestrator-guide.md"],
-    "ignored": ["tasks/", "reviews/", "state/"]
+    "ignored": ["tasks/", "reviews/", "state/"],
+    "watched_external": ["~/.claude/settings.json", "~/.gemini/antigravity-cli/settings.json", "~/.codex/config.toml"]
   }
 }

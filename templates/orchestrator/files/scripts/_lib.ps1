@@ -256,7 +256,8 @@ function Show-Violations($Violations) {
 }
 
 # Các vị trí trong git có thể chạy lệnh hoặc che file khỏi kiểm tra phạm vi. GỌI TRƯỚC khi chạy worker (có gọi git).
-# Trả về mảng [pscustomobject]@{ Kind = 'config'|'hooks'|'info'|'hooksPath'; Path = <đường dẫn tuyệt đối>; IsDir = <bool> }
+# watched_external nhận đường dẫn tuyệt đối, ~/ hoặc ~\ mở thành $HOME; đường dẫn tương đối tính từ gốc project. Bỏ qua phần tử rỗng/null.
+# Trả về mảng [pscustomobject]@{ Kind = 'config'|'hooks'|'info'|'hooksPath'|'refs'|'gitignore'|'external'; Path = <đường dẫn tuyệt đối>; IsDir = <bool> }
 function Get-GitWatchRoots {
     $commonResult = Invoke-Git 'rev-parse --git-common-dir'
     if ($commonResult.ExitCode -ne 0) { throw "git rev-parse --git-common-dir lỗi: $($commonResult.StdErr)" }
@@ -264,11 +265,50 @@ function Get-GitWatchRoots {
     if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $script:ProjectRoot $common }
     $common = [IO.Path]::GetFullPath($common)
 
+    $gitDirResult = Invoke-Git 'rev-parse --git-dir'
+    if ($gitDirResult.ExitCode -ne 0) { throw "git rev-parse --git-dir lỗi: $($gitDirResult.StdErr)" }
+    $gitDir = $gitDirResult.StdOut.Trim()
+    if (-not [IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $script:ProjectRoot $gitDir }
+    $gitDir = [IO.Path]::GetFullPath($gitDir)
+
+    $branchResult = Invoke-Git 'rev-parse --abbrev-ref HEAD'
+    if ($branchResult.ExitCode -ne 0) { throw "git rev-parse --abbrev-ref HEAD lỗi: $($branchResult.StdErr)" }
+    $branch = $branchResult.StdOut.Trim()
+
     $roots = @(
         [pscustomobject]@{ Kind = 'config'; Path = [IO.Path]::GetFullPath((Join-Path $common 'config')); IsDir = $false },
         [pscustomobject]@{ Kind = 'hooks'; Path = [IO.Path]::GetFullPath((Join-Path $common 'hooks')); IsDir = $true },
-        [pscustomobject]@{ Kind = 'info'; Path = [IO.Path]::GetFullPath((Join-Path $common 'info')); IsDir = $true }
+        [pscustomobject]@{ Kind = 'info'; Path = [IO.Path]::GetFullPath((Join-Path $common 'info')); IsDir = $true },
+        [pscustomobject]@{ Kind = 'refs'; Path = [IO.Path]::GetFullPath((Join-Path $common 'HEAD')); IsDir = $false },
+        [pscustomobject]@{ Kind = 'refs'; Path = [IO.Path]::GetFullPath((Join-Path $common 'packed-refs')); IsDir = $false },
+        [pscustomobject]@{ Kind = 'refs'; Path = [IO.Path]::GetFullPath((Join-Path (Join-Path $gitDir 'refs/heads') $branch)); IsDir = $false }
     )
+
+    $gitignoreResult = Invoke-Git 'ls-files -co --exclude-standard -- "*.gitignore" ".gitignore"'
+    if ($gitignoreResult.ExitCode -ne 0) { throw "git ls-files không tìm được .gitignore: $($gitignoreResult.StdErr)" }
+    $gitignorePaths = @(Get-Lines $gitignoreResult.StdOut)
+    foreach ($relativePath in $gitignorePaths) {
+        $gitignorePath = Join-Path $script:ProjectRoot $relativePath
+        $roots += [pscustomobject]@{ Kind = 'gitignore'; Path = [IO.Path]::GetFullPath($gitignorePath); IsDir = $false }
+    }
+    if ($gitignorePaths.Count -gt 0) {
+        # Theo dõi cả .gitignore sẽ được tạo sau khi chụp roots, kể cả khi nó nằm trong thư mục con đã có.
+        # Snapshot chỉ lấy file tên .gitignore từ root này, không băm các file nguồn khác.
+        $roots += [pscustomobject]@{ Kind = 'gitignore'; Path = $script:ProjectRoot; IsDir = $true; NameFilter = '.gitignore' }
+    }
+
+    $scope = Get-Prop (Get-Config) 'scope'
+    $defaultExternal = @('~/.claude/settings.json', '~/.gemini/antigravity-cli/settings.json', '~/.codex/config.toml')
+    foreach ($externalItem in @(Get-Prop $scope 'watched_external' $defaultExternal)) {
+        if ($null -eq $externalItem) { continue }
+        $externalPath = [string]$externalItem
+        if ([string]::IsNullOrWhiteSpace($externalPath)) { continue }
+        if ($externalPath -match '^~[\\/]') { $externalPath = Join-Path $HOME $externalPath.Substring(2) }
+        elseif (-not [IO.Path]::IsPathRooted($externalPath)) { $externalPath = Join-Path $script:ProjectRoot $externalPath }
+        $externalPath = [IO.Path]::GetFullPath($externalPath)
+        $alreadyWatched = @($roots | Where-Object { -not $_.IsDir -and $_.Path.Equals($externalPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if (-not $alreadyWatched) { $roots += [pscustomobject]@{ Kind = 'external'; Path = $externalPath; IsDir = $false } }
+    }
 
     $hooksResult = Invoke-Git 'config --get core.hooksPath'
     $hooksPath = if ($hooksResult.ExitCode -eq 0) { $hooksResult.StdOut.Trim() } else { '' }
@@ -306,7 +346,11 @@ function Get-GitDirSnapshot([object[]]$Roots) {
         $files = @()
         if ($root.IsDir) {
             if (Test-Path -LiteralPath $root.Path -PathType Container) {
-                $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+                if (Test-Prop $root 'NameFilter') {
+                    $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -Filter ([string]$root.NameFilter) -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -notmatch '[\\/]\.git([\\/]|$)' })
+                } else {
+                    $files = @(Get-ChildItem -LiteralPath $root.Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+                }
             }
         } elseif (Test-Path -LiteralPath $root.Path -PathType Leaf) {
             $files = @(Get-Item -LiteralPath $root.Path -Force)
@@ -343,7 +387,7 @@ function Compare-GitDirSnapshot($Before, $After) {
 # In danh sách thay đổi .git theo định dạng cố định.
 function Show-GitDirChanges($Changes) {
     Write-Host 'Worker đã thay đổi thư mục git (hook/cấu hình — có thể chạy lệnh khi commit/checkout):'
-    $Changes | ForEach-Object { Write-Host "  $($_.Status) $($_.Path)" }
+    $Changes | ForEach-Object { Write-Host "  $($_.Status) $($_.Path) ($($_.Kind))" }
 }
 
 # Tìm JSON envelope của worker (agy --output-format json) trong stdout. Không bao giờ ném lỗi.

@@ -118,7 +118,8 @@ $workerWatch.Stop()
 $workerSeconds = [Math]::Round($workerWatch.Elapsed.TotalSeconds, 1)
 $gitAfter = Get-GitDirSnapshot $watchRoots
 $gitChanges = @(Compare-GitDirSnapshot $gitBefore $gitAfter)
-$gitUnsafe = @($gitChanges | Where-Object { $_.Kind -eq 'config' -or $_.Kind -eq 'info' }).Count -gt 0
+$gitUnsafe = @($gitChanges | Where-Object { @('config', 'info', 'refs', 'gitignore') -contains $_.Kind }).Count -gt 0
+$gitDiffUntrusted = @($gitChanges | Where-Object { $_.Kind -eq 'refs' -or $_.Kind -eq 'gitignore' }).Count -gt 0
 
 # 3. Phân loại kết quả. Với agy-json, vẫn đọc envelope để lưu log cả khi worker lỗi/quá giờ.
 $workerText = [string]$r.StdOut
@@ -211,7 +212,7 @@ if ($outputMode -eq 'agy-json') {
 }
 if ($gitChanges.Count -gt 0) {
     $logLines += '## GIT-DIR'
-    $logLines += @($gitChanges | ForEach-Object { "$($_.Status) $($_.Path)" })
+    $logLines += @($gitChanges | ForEach-Object { "$($_.Status) $($_.Path) ($($_.Kind))" })
     $logLines += ''
 }
 $logLines += @('## STDOUT', $r.StdOut, '', '## STDERR', $r.StdErr, '')
@@ -226,12 +227,16 @@ if ($markerOk) { Write-TextUtf8 $outputPath ($m.Groups[1].Value.Trim() + "`n") }
 else { Write-TextUtf8 $outputPath ("> CẢNH BÁO: không tìm thấy marker OUTPUT_START/OUTPUT_END — nội dung gốc:`n`n" + $workerText) }
 Copy-Item -LiteralPath $outputPath -Destination (Join-Path $historyDir "$stamp-output.md")
 
-# 5. Kiểm tra phạm vi. Không gọi git sau thay đổi config/info vì config có thể chạy lệnh.
+# 5. Kiểm tra phạm vi. Không gọi git sau thay đổi config/info/refs/gitignore vì cấu hình có thể chạy lệnh hoặc kết quả git không còn tin được.
 $changes = [pscustomobject]@{ Changed = @(); Violations = @() }
 $changesListed = $false
 $scopeError = $null
 if ($gitUnsafe) {
-    Write-TextUtf8 (Join-Path $taskDir 'changed-files.txt') "(Không liệt kê: worker đã sửa .git/config hoặc .git/info — git diff có thể chạy lệnh do cấu hình chỉ định. Xem $taskRel/worker.log, mục GIT-DIR.)`n"
+    if ($gitDiffUntrusted) {
+        Write-TextUtf8 (Join-Path $taskDir 'changed-files.txt') "(Không liệt kê: worker đã sửa refs hoặc .gitignore — kết quả git diff/ls-files không còn tin được. Xem $taskRel/worker.log, mục GIT-DIR.)`n"
+    } else {
+        Write-TextUtf8 (Join-Path $taskDir 'changed-files.txt') "(Không liệt kê: worker đã sửa .git/config hoặc .git/info — git diff có thể chạy lệnh do cấu hình chỉ định. Xem $taskRel/worker.log, mục GIT-DIR.)`n"
+    }
 } else {
     try {
         $changes = Save-TaskChanges $TaskId
@@ -282,7 +287,9 @@ $metricsPath = Join-Path $taskDir 'metrics.jsonl'
 
 if ($scopeError -and $gitChanges.Count -eq 0) { throw $scopeError }
 if ($gitChanges.Count -gt 0) {
-    Fail 6 'Worker sửa thư mục .git (hook/cấu hình git). DỪNG, báo người dùng; không tự hoàn tác, KHÔNG chạy lệnh git nào (commit, checkout...) trước khi người dùng kiểm tra.'
+    $gitFailureMessage = 'Worker sửa thư mục .git (hook/cấu hình git). DỪNG, báo người dùng; không tự hoàn tác, KHÔNG chạy lệnh git nào (commit, checkout...) trước khi người dùng kiểm tra.'
+    if ($gitDiffUntrusted) { $gitFailureMessage += ' Với thay đổi refs/gitignore, kết quả git diff không còn tin được.' }
+    Fail 6 $gitFailureMessage
 }
 if ($changes.Violations.Count -gt 0) {
     Fail 6 'Worker vi phạm phạm vi. DỪNG, báo người dùng; không tự hoàn tác.'

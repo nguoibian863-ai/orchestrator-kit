@@ -24,6 +24,8 @@ Cập nhật v3.8: vòng fix tiếp tục phiên worker cũ (`-Resume` + `resume
 
 Cập nhật v3.9: khoá `mode` (`lean` mặc định | `full`) — lean thì orchestrator tự thiết kế/chia task/review và `run-review.ps1` đọc một file `review-output.md`; thêm lệnh `/quick` cho thay đổi nhỏ.
 
+Cập nhật v3.10: kiểm tra phạm vi theo dõi thêm `.gitignore`, `HEAD`/ref nhánh và các file trong `scope.watched_external` (cấu hình quyền của worker).
+
 | Vấn đề ở v2 | Cách v3 xử lý |
 |---|---|
 | `commands/`, `agents/`, `skills/` ở gốc project → Claude Code không nhận, `/feature`... không tồn tại | Chuyển vào `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, có frontmatter; agent là subagent thật (context riêng) |
@@ -203,6 +205,8 @@ Phân loại `agy-json`: stdout rỗng → 9; không có envelope → 11; `statu
 
 Kiểm tra phạm vi (tự động sau mỗi lần chạy worker): mọi file thay đổi so với `base_commit` (kể cả file mới chưa track) được so với `scope.always_protected` + `tasks/<ID>/do-not-modify.txt`. Glob: `*` không qua `/`, `**` qua mọi cấp, `thu-muc/` = mọi thứ bên trong. `tasks/`, `reviews/`, `state/` không tính (do script ghi).
 
+Script chụp dấu vân tay trước/sau worker cho các loại `config`, `hooks`, `info`, `hooksPath`, `refs`, `gitignore` và `external`. `scope.watched_external` phát hiện worker sửa cấu hình quyền của chính nó; đường dẫn `~/` hoặc `~\` mở thành `$HOME`, đường dẫn tương đối tính từ gốc project, phần tử rỗng/null bị bỏ qua và mảng rỗng tắt theo dõi bên ngoài. Nếu `.gitignore` hoặc refs đổi, kết quả `git diff`/`ls-files` không còn tin được nên script bỏ qua bước liệt kê thay đổi.
+
 `output` có thể đặt về `"text"` để dùng cách đọc stdout cũ; khi đó bỏ `--output-format json` khỏi `agy` args. Nếu agy `--effort high` thường hết `--print-timeout 8m` (mã 9), hạ mức effort trong args.
 
 ## 9. Kiểm tra tự động
@@ -263,8 +267,9 @@ Trước task đầu tiên: điền `checks`, `git init` + commit khung (Claude 
 
 - Script chỉ hỗ trợ Windows (dùng `cmd.exe`, `taskkill`).
 - `agy -p` từng có lỗi treo khi chạy với output chuyển hướng trên Windows (issue #318 của antigravity-cli, bản 1.0.6). Bản 1.3.1 đã chạy được qua script; nếu bản khác bị treo, script vẫn dừng ở `timeout_sec` và trả mã 124.
-- Phát hiện file cấm dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác. Riêng `.git/config`, `.git/hooks/**`, `.git/info/**` và `core.hooksPath` được chụp trước/sau worker; nếu `.git/config` hoặc `.git/info/**` đổi, script bỏ qua `git diff` và không chạy lệnh git nào trước khi người dùng kiểm tra.
-- Giới hạn đã biết (R10): chưa phát hiện worker sửa `.gitignore` để che file mới trong thư mục cấm, ghi file ra ngoài workspace bằng đường dẫn tuyệt đối, hoặc sửa `refs/`, `HEAD`, `index`.
+- Phát hiện file cấm dựa trên git diff, nên chỉ phát hiện sau khi worker đã sửa — script dừng và báo, không tự hoàn tác. Các loại `config`, `hooks`, `info`, `hooksPath`, `refs`, `gitignore` và `external` được chụp trước/sau worker; thay đổi `config`, `info`, `refs` hoặc `gitignore` khiến script bỏ qua bước liệt kê thay đổi.
+- Không chặn được worker ghi file ra ngoài workspace bằng đường dẫn tuyệt đối — việc này do sandbox của worker lo (codex `workspace-write`, agy `accept-edits`). Bộ mẫu chỉ theo dõi các file trong `scope.watched_external`.
+- `.git/index` không được theo dõi: `git diff <base_commit>` so với cây làm việc nên sửa index che được rất ít.
 - Thay đổi trong `tasks/`, `reviews/`, `state/` không được kiểm tra phạm vi.
 - Script đếm phát hiện dựa trên định dạng báo cáo; nhãn sai vị trí hoặc sai giá trị được coi là thiếu nhãn và CRITICAL/HIGH vẫn tính chặn. Agent viết sai định dạng khác vẫn có thể bị đếm sai — Claude vẫn phải đọc báo cáo tổng hợp khi kết quả đáng ngờ.
 

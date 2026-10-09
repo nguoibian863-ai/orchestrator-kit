@@ -50,7 +50,7 @@ Chế độ lean: orchestrator tự ghi `tasks/feature-<slug>/plan.md` theo cùn
 | 0 | Worker và checks đạt. Đọc `tasks/<ID>/output.md`, cả mục 'Sai lệch so với yêu cầu', và `changed-files.txt`, sang bước c. Nếu `worker.log` ghi nhận hành động bị từ chối, ghi nhận để nêu trong tổng kết. |
 | 1 (checks) | Sang bước e. Đọc 15 dòng cuối script in ra; log đầy đủ ở `tasks/<ID>/checks.log`. |
 | 2 (checks) | Hỏi người dùng lệnh kiểm tra, điền `checks`, chạy lại bước b. |
-| 6 | Worker sửa file bị cấm hoặc sửa `.git/` (hook, config, info) → DỪNG, báo người dùng danh sách file. Không tự hoàn tác, không chạy lệnh git nào (commit, checkout...) |
+| 6 | Worker sửa file bị cấm hoặc sửa `.git/` (hook, config, info), `.gitignore`, `HEAD`/ref nhánh, hoặc file trong `scope.watched_external` → DỪNG, báo người dùng danh sách file. Không tự hoàn tác, không chạy lệnh git nào (commit, checkout...) |
 | 1 (run-worker), 3, 5, 7, 8, 9, 10, 11, 124 | DỪNG, báo người dùng thông điệp của script (kèm đường dẫn `worker.log`/`output.md`). Không tự đoán kết quả |
 
 **c. Review** — `scripts/update-workflow.ps1 -Phase review-loop`. Gọi **song song** 3 subagent `reviewer`, `security`, `qa` với TaskId; mỗi agent tự ghi `tasks/<ID>/<tên>-output.md`.
