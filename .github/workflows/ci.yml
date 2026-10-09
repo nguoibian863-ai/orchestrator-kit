@@ -17,23 +17,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shell: [powershell, pwsh]
+        # Khong dat ten khoa matrix la "shell": GitHub tu choi ca file workflow.
+        ps: [powershell, pwsh]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Phien ban PowerShell va git
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.ps }}
         run: |
           $PSVersionTable.PSVersion.ToString()
           git --version
 
       - name: Kiem tra cu phap va BOM cua file .ps1
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.ps }}
         run: .github/scripts/check-scripts.ps1
 
       - name: Smoke test
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.ps }}
         run: |
           git config --global user.name ci
           git config --global user.email ci@example.invalid
